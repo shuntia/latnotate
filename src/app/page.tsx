@@ -170,7 +170,8 @@ interface SentenceWord {
   hasEtPrefix?: boolean; // Flag for -que words with "et" prepended
   etGuessed?: boolean; // Whether the "et" was automatically added
   override?: { // Manual override of word type
-    type: string;
+    type: string; // e.g., "Noun", "Verb", "Adjective"
+    morphology?: string; // e.g., "Genitive Singular", "Accusative Plural"
     manual: boolean;
   };
 }
@@ -1017,6 +1018,7 @@ export default function Home() {
   } | null>(null);
   const [overrideDialogIndex, setOverrideDialogIndex] = useState<number | null>(null);
   const [overrideType, setOverrideType] = useState<string>("");
+  const [overrideMorphology, setOverrideMorphology] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
 
   // Layout refs for SVG drawing
@@ -1512,7 +1514,8 @@ export default function Home() {
     } else {
       // Normal Click - Open Dialog
       const word = analyzerWords[index];
-      if (word && word.lookupResults && word.lookupResults.length > 0) {
+      // Allow clicking on words with lookup results OR override words
+      if (word && ((word.lookupResults && word.lookupResults.length > 0) || word.override)) {
         setSelectedWordIndex(index);
       }
     }
@@ -1555,30 +1558,53 @@ export default function Home() {
     return "px-1";
   };
 
-  const getWordMargin = (word: SentenceWord) => {
+  const hasAdjacentConnection = (word: SentenceWord, wordIndex: number): boolean => {
+    // Check if this word has an adjacent connection (annotation to next/previous word)
+    return word.annotations.some(ann => {
+      if (ann.type === "modify" || ann.type === "possession") {
+        if (ann.targetIndex !== undefined) {
+          return Math.abs(ann.targetIndex - wordIndex) === 1;
+        }
+      }
+      return false;
+    });
+  };
+
+  const getWordMargin = (word: SentenceWord, wordIndex: number) => {
     const tag = getTagFromWord(word);
     const hasGuess = word.guessed;
+    const hasAdjConn = hasAdjacentConnection(word, wordIndex);
+    
+    // Add extra margin if word has adjacent connection to create space for the line
+    let baseMargin = "";
+    if (hasAdjConn) {
+      baseMargin = "mr-4"; // Extra space for adjacent connection line
+    }
     
     // Add right margin to accommodate badges that extend beyond the word
     // If both tag and guess: "?" is at -right-6 from word edge
     if (tag && hasGuess) {
-      return "mr-7";  // Extra margin for the ? badge
+      return hasAdjConn ? "mr-8" : "mr-7";  // Extra margin for the ? badge
     }
     // If only guess (no tag): "?" at -right-2
     else if (hasGuess) {
-      return "mr-3";  // Less margin needed
+      return hasAdjConn ? "mr-5" : "mr-3";  // Less margin needed
     }
-    // Normal - no extra margin needed, gap-x-3 handles it
-    return "";
+    // Return base margin (for adjacent connection or empty)
+    return baseMargin;
   };
 
   const renderBadge = (word: SentenceWord, wordIndex: number) => {
     // Override badge
     if (word.override) {
+      const tooltipText = word.override.morphology 
+        ? `Override: ${word.override.type} - ${word.override.morphology} - click to remove`
+        : `Override: ${word.override.type} - click to remove`;
+      
       return (
         <span
           className="absolute -top-3 -right-2 text-[10px] font-bold px-1 rounded bg-red-600 border border-red-700 text-white shadow-sm cursor-pointer hover:bg-red-700"
-          title={`Override: ${word.override.type} - click to remove`}
+          title={tooltipText}
           onClick={(e) => {
             e.stopPropagation();
             const newWords = [...analyzerWords];
@@ -1836,7 +1862,7 @@ export default function Home() {
                         <TooltipProvider key={word.id}>
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <div className={`flex items-center ${getWordMargin(word)}`}>
+                              <div className={`flex items-center ${getWordMargin(word, i)}`}>
                                 {/* "et" box for -que words */}
                                 {word.hasEtPrefix && (
                                   <span className="inline-flex items-center mr-2 select-none">
@@ -1875,7 +1901,7 @@ export default function Home() {
                                     wordRefs.current[i] = el;
                                   }}
                                   onClick={() =>
-                                    (hasResults || interactionMode) &&
+                                    (hasResults || word.override || interactionMode) &&
                                     handleWordInteraction(i)
                                   }
                                   onContextMenu={(e) =>
@@ -1922,6 +1948,9 @@ export default function Home() {
                               <TooltipContent>
                                 <p className="font-bold text-red-600">Override</p>
                                 <p className="text-xs opacity-80">{word.override.type}</p>
+                                {word.override.morphology && (
+                                  <p className="text-xs opacity-70">{word.override.morphology}</p>
+                                )}
                                 <p className="text-[10px] opacity-60 mt-1">Click badge to remove</p>
                               </TooltipContent>
                             )}
@@ -2173,8 +2202,42 @@ export default function Home() {
               </div>
             )}
 
+            {/* Override Status */}
+            {selectedWord?.override && (
+              <div className="bg-red-50 p-3 rounded-md border border-red-200 mb-4 flex justify-between items-center">
+                <div>
+                  <span className="font-bold text-red-900">Override:</span>
+                  <span className="ml-2 text-red-800">
+                    {selectedWord.override.type}
+                  </span>
+                  {selectedWord.override.morphology && (
+                    <span className="ml-2 text-xs bg-white px-2 py-0.5 rounded border text-red-700">
+                      {selectedWord.override.morphology}
+                    </span>
+                  )}
+                  <span className="ml-2 text-xs bg-white px-2 py-0.5 rounded border text-red-500">
+                    Manual
+                  </span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    if (selectedWordIndex !== null) {
+                      const newWords = [...analyzerWords];
+                      delete newWords[selectedWordIndex].override;
+                      setAnalyzerWords(newWords);
+                      setSelectedWordIndex(null);
+                    }
+                  }}
+                >
+                  <X className="w-4 h-4 mr-1" /> Remove Override
+                </Button>
+              </div>
+            )}
+
             {/* Current Selection Status */}
-            {selectedWord?.selectedEntry && (
+            {selectedWord?.selectedEntry && !selectedWord?.override && (
               <div className="bg-blue-50 p-3 rounded-md border border-blue-100 mb-4 flex justify-between items-center">
                 <div>
                   <span className="font-bold text-blue-900">Current:</span>
@@ -2208,20 +2271,26 @@ export default function Home() {
             )}
 
             <div className="space-y-6 mt-2">
-              {selectedWord?.lookupResults
-                ?.slice() // Create a copy to avoid mutating original
-                .sort((a, b) => {
-                  // If this entry is the guessed one, put it first
-                  const aIsGuessed = selectedWord.selectedEntry === a && selectedWord.guessed;
-                  const bIsGuessed = selectedWord.selectedEntry === b && selectedWord.guessed;
-                  
-                  if (aIsGuessed && !bIsGuessed) return -1;
-                  if (!aIsGuessed && bIsGuessed) return 1;
-                  
-                  // Otherwise maintain original order
-                  return 0;
-                })
-                .map((entry, i) => (
+              {selectedWord?.override ? (
+                <div className="text-center py-8 text-gray-500">
+                  <p className="text-sm">This word is manually overridden.</p>
+                  <p className="text-xs mt-2">Remove the override above to select from dictionary entries.</p>
+                </div>
+              ) : (
+                selectedWord?.lookupResults
+                  ?.slice() // Create a copy to avoid mutating original
+                  .sort((a, b) => {
+                    // If this entry is the guessed one, put it first
+                    const aIsGuessed = selectedWord.selectedEntry === a && selectedWord.guessed;
+                    const bIsGuessed = selectedWord.selectedEntry === b && selectedWord.guessed;
+                    
+                    if (aIsGuessed && !bIsGuessed) return -1;
+                    if (!aIsGuessed && bIsGuessed) return 1;
+                    
+                    // Otherwise maintain original order
+                    return 0;
+                  })
+                  .map((entry, i) => (
                 <div
                   key={i}
                   className={`border rounded-lg p-4 transition-colors ${selectedWord.selectedEntry === entry ? "ring-2 ring-indigo-500 bg-indigo-50/10" : "hover:bg-gray-50"}`}
@@ -2322,7 +2391,8 @@ export default function Home() {
                     </div>
                   </div>
                 </div>
-              ))}
+              ))
+              )}
             </div>
           </DialogContent>
         </Dialog>
@@ -2394,6 +2464,7 @@ export default function Home() {
             <Dialog open={true} onOpenChange={() => {
               setOverrideDialogIndex(null);
               setOverrideType("");
+              setOverrideMorphology("");
             }}>
               <DialogContent className="max-w-md">
                 <DialogHeader>
@@ -2405,11 +2476,11 @@ export default function Home() {
                       <strong>Word:</strong> {word.original}
                     </p>
                     <p className="text-xs text-red-700 mt-1">
-                      This will override the morphological analysis
+                      Manually specify word type and morphology
                     </p>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium mb-2">Word Type</label>
+                    <label className="block text-sm font-medium mb-2">Word Type *</label>
                     <input
                       type="text"
                       className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
@@ -2419,14 +2490,28 @@ export default function Home() {
                       autoFocus
                     />
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Morphology (optional)</label>
+                    <input
+                      type="text"
+                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                      placeholder="e.g., Genitive Singular, Accusative Plural"
+                      value={overrideMorphology}
+                      onChange={(e) => setOverrideMorphology(e.target.value)}
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Specify case, number, gender, tense, etc.
+                    </p>
+                  </div>
                   <div className="flex gap-2">
                     <Button
                       onClick={() => {
                         if (overrideType.trim()) {
                           const newWords = [...analyzerWords];
-                          // Create override entry
+                          // Create override entry with morphology
                           newWords[overrideDialogIndex].override = {
                             type: overrideType.trim(),
+                            morphology: overrideMorphology.trim() || undefined,
                             manual: true,
                           };
                           // Clear existing selections when overriding
@@ -2436,6 +2521,7 @@ export default function Home() {
                         }
                         setOverrideDialogIndex(null);
                         setOverrideType("");
+                        setOverrideMorphology("");
                       }}
                       variant="destructive"
                       className="flex-1"
@@ -2447,6 +2533,7 @@ export default function Home() {
                       onClick={() => {
                         setOverrideDialogIndex(null);
                         setOverrideType("");
+                        setOverrideMorphology("");
                       }}
                       variant="outline"
                       className="flex-1"
