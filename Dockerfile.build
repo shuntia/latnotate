@@ -1,0 +1,28 @@
+# Build Whitaker's Words binary compatible with Amazon Linux 2 (Vercel runtime)
+# Usage:
+#   docker build -f Dockerfile.build -t words-builder .
+#   docker create --name words-temp words-builder
+#   docker cp words-temp:/output/words ./bin/words
+#   docker rm words-temp
+
+FROM public.ecr.aws/lambda/provided:al2
+
+# Install build dependencies
+RUN yum update -y && \
+    yum install -y gcc gcc-c++ make git
+
+# Try to install GNAT/gprbuild from EPEL
+RUN yum install -y epel-release && \
+    yum install -y gprbuild gcc-gnat || echo "GNAT not available in repos"
+
+# Set working directory
+WORKDIR /build
+
+# Note: You need GNAT (Ada compiler) and gprbuild installed
+# If they're not available in the Amazon Linux 2 repos, you'll need to:
+# 1. Build from source
+# 2. Use a pre-compiled GNAT for AL2
+# 3. Use a different base image with GNAT pre-installed
+
+# For now, this Dockerfile documents the approach
+# The actual build might need manual steps or a GitHub Actions workflow

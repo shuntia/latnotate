@@ -145,6 +145,20 @@ Contributions welcome! Please:
 3. Follow existing code style (ESLint configured)
 4. Update documentation as needed
 
+## Deployment
+
+### Vercel Deployment
+
+⚠️ **Important:** The `bin/words` binary must be compatible with Amazon Linux 2 (GLIBC 2.26-2.31).
+
+If you encounter GLIBC version errors on Vercel:
+
+1. See **[BUILD_FOR_VERCEL.md](BUILD_FOR_VERCEL.md)** for detailed instructions
+2. Use the GitHub Actions workflow (`.github/workflows/build-binary.yml`) to build a compatible binary
+3. Or manually build on Ubuntu 20.04 and commit the binary
+
+The workflow can be triggered manually from the Actions tab on GitHub.
+
 ## Credits
 
 - **Whitaker's Words** - Latin dictionary and morphological analyzer by William Whitaker

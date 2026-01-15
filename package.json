@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "build:binary": "cd whitakers-words && make clean && make && cp bin/words ../bin/words"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
