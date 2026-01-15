@@ -1102,7 +1102,7 @@ export default function Home() {
                   fill="none"
                   markerEnd={ann.type === "possession" ? "url(#arrowhead)" : undefined}
                   strokeDasharray="4"
-                  className={ann.guessed ? "pointer-events-auto cursor-pointer" : ""}
+                  className={ann.guessed ? "pointer-events-auto cursor-pointer" : "pointer-events-none"}
                   onClick={
                     ann.guessed
                       ? (e) => {
@@ -1119,7 +1119,7 @@ export default function Home() {
                   strokeWidth="2"
                   fill="none"
                   strokeDasharray="4"
-                  className={ann.guessed ? "pointer-events-auto cursor-pointer" : ""}
+                  className={ann.guessed ? "pointer-events-auto cursor-pointer" : "pointer-events-none"}
                   onClick={
                     ann.guessed
                       ? (e) => {
@@ -1189,7 +1189,7 @@ export default function Home() {
                   markerEnd={
                     ann.type === "possession" ? "url(#arrowhead)" : undefined
                   }
-                  className={ann.guessed ? "pointer-events-auto cursor-pointer" : ""}
+                  className={ann.guessed ? "pointer-events-auto cursor-pointer" : "pointer-events-none"}
                   onClick={
                     ann.guessed
                       ? (e) => {
@@ -1269,7 +1269,7 @@ export default function Home() {
                   markerEnd={
                     ann.type === "possession" ? "url(#arrowhead)" : undefined
                   }
-                  className={ann.guessed ? "pointer-events-auto cursor-pointer" : ""}
+                  className={ann.guessed ? "pointer-events-auto cursor-pointer" : "pointer-events-none"}
                   onClick={
                     ann.guessed
                       ? (e) => {
@@ -1849,7 +1849,7 @@ export default function Home() {
                   ref={containerRef}
                 >
                   {/* SVG Overlay */}
-                  <svg className="absolute inset-0 w-full h-full pointer-events-none z-0 overflow-visible">
+                  <svg className="absolute inset-0 w-full h-full z-0 overflow-visible">
                     {lines}
                   </svg>
 
@@ -2466,7 +2466,7 @@ export default function Home() {
               setOverrideType("");
               setOverrideMorphology("");
             }}>
-              <DialogContent className="max-w-md">
+              <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle className="text-red-600">Override Word Type</DialogTitle>
                 </DialogHeader>
@@ -2476,34 +2476,314 @@ export default function Home() {
                       <strong>Word:</strong> {word.original}
                     </p>
                     <p className="text-xs text-red-700 mt-1">
-                      Manually specify word type and morphology
+                      Select part of speech and morphological features
                     </p>
                   </div>
+
+                  {/* Part of Speech Selection */}
                   <div>
-                    <label className="block text-sm font-medium mb-2">Word Type *</label>
-                    <input
-                      type="text"
-                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
-                      placeholder="e.g., Noun, Verb, Adjective"
-                      value={overrideType}
-                      onChange={(e) => setOverrideType(e.target.value)}
-                      autoFocus
-                    />
+                    <label className="block text-sm font-semibold mb-2 text-gray-700">Part of Speech *</label>
+                    <div className="flex flex-wrap gap-2">
+                      {["Noun", "Verb", "Adjective", "Adverb", "Pronoun", "Preposition", "Conjunction", "Interjection"].map((pos) => (
+                        <button
+                          key={pos}
+                          onClick={() => {
+                            setOverrideType(pos);
+                            // Clear morphology when changing POS
+                            setOverrideMorphology("");
+                          }}
+                          className={`px-3 py-1.5 text-sm rounded border transition-colors ${
+                            overrideType === pos
+                              ? "bg-red-600 text-white border-red-700"
+                              : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                          }`}
+                        >
+                          {pos}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Morphology (optional)</label>
-                    <input
-                      type="text"
-                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
-                      placeholder="e.g., Genitive Singular, Accusative Plural"
-                      value={overrideMorphology}
-                      onChange={(e) => setOverrideMorphology(e.target.value)}
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Specify case, number, gender, tense, etc.
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
+
+                  {/* Morphology Selection (conditional on POS) */}
+                  {overrideType && (
+                    <div className="space-y-3 border-t pt-4">
+                      {/* NOUN */}
+                      {overrideType === "Noun" && (
+                        <>
+                          <div>
+                            <label className="block text-sm font-semibold mb-2 text-gray-700">Case</label>
+                            <div className="flex flex-wrap gap-2">
+                              {["Nominative", "Genitive", "Dative", "Accusative", "Ablative", "Vocative", "Locative"].map((c) => (
+                                <button
+                                  key={c}
+                                  onClick={() => {
+                                    const parts = overrideMorphology.split(" ");
+                                    parts[0] = c;
+                                    setOverrideMorphology(parts.filter(p => p).join(" "));
+                                  }}
+                                  className={`px-3 py-1 text-sm rounded border ${
+                                    overrideMorphology.includes(c)
+                                      ? "bg-indigo-600 text-white border-indigo-700"
+                                      : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  {c}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-semibold mb-2 text-gray-700">Number</label>
+                            <div className="flex gap-2">
+                              {["Singular", "Plural"].map((n) => (
+                                <button
+                                  key={n}
+                                  onClick={() => {
+                                    const parts = overrideMorphology.split(" ");
+                                    parts[1] = n;
+                                    setOverrideMorphology(parts.filter(p => p).join(" "));
+                                  }}
+                                  className={`px-3 py-1 text-sm rounded border ${
+                                    overrideMorphology.includes(n)
+                                      ? "bg-indigo-600 text-white border-indigo-700"
+                                      : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  {n}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-semibold mb-2 text-gray-700">Gender (optional)</label>
+                            <div className="flex gap-2">
+                              {["Masculine", "Feminine", "Neuter"].map((g) => (
+                                <button
+                                  key={g}
+                                  onClick={() => {
+                                    const parts = overrideMorphology.split(" ");
+                                    parts[2] = parts[2] === g ? "" : g;
+                                    setOverrideMorphology(parts.filter(p => p).join(" "));
+                                  }}
+                                  className={`px-3 py-1 text-sm rounded border ${
+                                    overrideMorphology.includes(g)
+                                      ? "bg-indigo-600 text-white border-indigo-700"
+                                      : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  {g}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      )}
+
+                      {/* ADJECTIVE */}
+                      {overrideType === "Adjective" && (
+                        <>
+                          <div>
+                            <label className="block text-sm font-semibold mb-2 text-gray-700">Case</label>
+                            <div className="flex flex-wrap gap-2">
+                              {["Nominative", "Genitive", "Dative", "Accusative", "Ablative", "Vocative"].map((c) => (
+                                <button
+                                  key={c}
+                                  onClick={() => {
+                                    const parts = overrideMorphology.split(" ");
+                                    parts[0] = c;
+                                    setOverrideMorphology(parts.filter(p => p).join(" "));
+                                  }}
+                                  className={`px-3 py-1 text-sm rounded border ${
+                                    overrideMorphology.includes(c)
+                                      ? "bg-indigo-600 text-white border-indigo-700"
+                                      : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  {c}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-semibold mb-2 text-gray-700">Number</label>
+                            <div className="flex gap-2">
+                              {["Singular", "Plural"].map((n) => (
+                                <button
+                                  key={n}
+                                  onClick={() => {
+                                    const parts = overrideMorphology.split(" ");
+                                    parts[1] = n;
+                                    setOverrideMorphology(parts.filter(p => p).join(" "));
+                                  }}
+                                  className={`px-3 py-1 text-sm rounded border ${
+                                    overrideMorphology.includes(n)
+                                      ? "bg-indigo-600 text-white border-indigo-700"
+                                      : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  {n}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-semibold mb-2 text-gray-700">Gender</label>
+                            <div className="flex gap-2">
+                              {["Masculine", "Feminine", "Neuter"].map((g) => (
+                                <button
+                                  key={g}
+                                  onClick={() => {
+                                    const parts = overrideMorphology.split(" ");
+                                    parts[2] = g;
+                                    setOverrideMorphology(parts.filter(p => p).join(" "));
+                                  }}
+                                  className={`px-3 py-1 text-sm rounded border ${
+                                    overrideMorphology.includes(g)
+                                      ? "bg-indigo-600 text-white border-indigo-700"
+                                      : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  {g}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      )}
+
+                      {/* VERB */}
+                      {overrideType === "Verb" && (
+                        <>
+                          <div>
+                            <label className="block text-sm font-semibold mb-2 text-gray-700">Tense</label>
+                            <div className="flex flex-wrap gap-2">
+                              {["Present", "Imperfect", "Future", "Perfect", "Pluperfect", "Future Perfect"].map((t) => (
+                                <button
+                                  key={t}
+                                  onClick={() => {
+                                    const parts = overrideMorphology.split(" ");
+                                    parts[0] = t;
+                                    setOverrideMorphology(parts.filter(p => p).join(" "));
+                                  }}
+                                  className={`px-3 py-1 text-sm rounded border ${
+                                    overrideMorphology.includes(t)
+                                      ? "bg-indigo-600 text-white border-indigo-700"
+                                      : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  {t}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-semibold mb-2 text-gray-700">Mood</label>
+                            <div className="flex gap-2">
+                              {["Indicative", "Subjunctive", "Imperative"].map((m) => (
+                                <button
+                                  key={m}
+                                  onClick={() => {
+                                    const parts = overrideMorphology.split(" ");
+                                    parts[1] = m;
+                                    setOverrideMorphology(parts.filter(p => p).join(" "));
+                                  }}
+                                  className={`px-3 py-1 text-sm rounded border ${
+                                    overrideMorphology.includes(m)
+                                      ? "bg-indigo-600 text-white border-indigo-700"
+                                      : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  {m}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-semibold mb-2 text-gray-700">Voice</label>
+                            <div className="flex gap-2">
+                              {["Active", "Passive"].map((v) => (
+                                <button
+                                  key={v}
+                                  onClick={() => {
+                                    const parts = overrideMorphology.split(" ");
+                                    parts[2] = v;
+                                    setOverrideMorphology(parts.filter(p => p).join(" "));
+                                  }}
+                                  className={`px-3 py-1 text-sm rounded border ${
+                                    overrideMorphology.includes(v)
+                                      ? "bg-indigo-600 text-white border-indigo-700"
+                                      : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  {v}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-semibold mb-2 text-gray-700">Person</label>
+                            <div className="flex gap-2">
+                              {["1st", "2nd", "3rd"].map((p) => (
+                                <button
+                                  key={p}
+                                  onClick={() => {
+                                    const parts = overrideMorphology.split(" ");
+                                    parts[3] = p;
+                                    setOverrideMorphology(parts.filter(p => p).join(" "));
+                                  }}
+                                  className={`px-3 py-1 text-sm rounded border ${
+                                    overrideMorphology.includes(p)
+                                      ? "bg-indigo-600 text-white border-indigo-700"
+                                      : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  {p} Person
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-semibold mb-2 text-gray-700">Number</label>
+                            <div className="flex gap-2">
+                              {["Singular", "Plural"].map((n) => (
+                                <button
+                                  key={n}
+                                  onClick={() => {
+                                    const parts = overrideMorphology.split(" ");
+                                    parts[4] = n;
+                                    setOverrideMorphology(parts.filter(p => p).join(" "));
+                                  }}
+                                  className={`px-3 py-1 text-sm rounded border ${
+                                    overrideMorphology.includes(n)
+                                      ? "bg-indigo-600 text-white border-indigo-700"
+                                      : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  {n}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      )}
+
+                      {/* Other POS (simple, no morphology needed) */}
+                      {["Adverb", "Preposition", "Conjunction", "Interjection", "Pronoun"].includes(overrideType) && (
+                        <p className="text-sm text-gray-500 italic">No additional morphology needed for {overrideType.toLowerCase()}s.</p>
+                      )}
+
+                      {/* Current Selection Display */}
+                      {overrideMorphology && (
+                        <div className="bg-blue-50 p-2 rounded border border-blue-200">
+                          <p className="text-xs text-blue-900">
+                            <strong>Selected:</strong> {overrideType} {overrideMorphology}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 pt-2">
                     <Button
                       onClick={() => {
                         if (overrideType.trim()) {
