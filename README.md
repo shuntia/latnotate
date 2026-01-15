@@ -73,7 +73,8 @@ latnotate/
 │   │   └── utils.ts           # Utility functions
 │   └── test/                  # Test files
 ├── bin/words                  # Whitaker's Words binary
-├── whitakers-words/           # Dictionary data files
+├── data/                      # Dictionary data files (*.GEN, *.LAT)
+├── whitakers-words/           # Source code and build system
 └── public/                    # Static assets
 ```
 

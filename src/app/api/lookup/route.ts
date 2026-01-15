@@ -483,7 +483,7 @@ export async function POST(req: NextRequest) {
 
     if (wordsToLookup.length === 0) return NextResponse.json({ results: [] });
 
-    const baseDir = path.join(process.cwd(), "whitakers-words");
+    const baseDir = path.join(process.cwd(), "data");
     const binPath = path.join(process.cwd(), "bin", "words");
 
     const results: { word: string; entries: WordEntry[] }[] = [];
