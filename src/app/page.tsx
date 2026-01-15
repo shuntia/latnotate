@@ -663,28 +663,32 @@ const applyGenitiveHeuristic = (words: SentenceWord[]): void => {
     const cgn = getCaseGenderNumber(word.selectedMorphology);
     if (!cgn || cgn.case !== "Genitive") return;
     
-    // Look backward for the nearest noun
+    // Look backward for the first word that must be a noun
+    // (has at least one noun entry in its results)
     for (let i = idx - 1; i >= 0; i--) {
       const candidate = words[i];
-      if (!candidate.selectedEntry || !candidate.selectedMorphology) continue;
       
-      // Check if it's a noun
-      if (candidate.selectedEntry.type === "Noun") {
-        // Create possession annotation if it doesn't exist
-        const existingConn = word.annotations.find(
-          (a) => a.type === "possession" && a.targetIndex === i
-        );
-        
-        if (!existingConn) {
-          word.annotations.push({
-            type: "possession",
-            targetIndex: i,
-            guessed: true,
-            heuristic: `Genitive modifying nearest noun "${candidate.original}"`,
-          });
-        }
-        return; // Found nearest noun, stop
+      // Check if this word has any noun entries at all
+      const hasNounEntry = candidate.lookupResults?.some(
+        entry => entry.type === "Noun"
+      );
+      
+      if (!hasNounEntry) continue;
+      
+      // This word can be a noun - connect to it
+      const existingConn = word.annotations.find(
+        (a) => a.type === "possession" && a.targetIndex === i
+      );
+      
+      if (!existingConn) {
+        word.annotations.push({
+          type: "possession",
+          targetIndex: i,
+          guessed: true,
+          heuristic: `Genitive modifying nearest possible noun "${candidate.original}"`,
+        });
       }
+      return; // Found nearest noun, stop
     }
   });
 };
@@ -1096,6 +1100,15 @@ export default function Home() {
                   fill="none"
                   markerEnd={ann.type === "possession" ? "url(#arrowhead)" : undefined}
                   strokeDasharray="4"
+                  className={ann.guessed ? "pointer-events-auto cursor-pointer" : ""}
+                  onClick={
+                    ann.guessed
+                      ? (e) => {
+                          e.stopPropagation();
+                          setGuessConfirmation({ wordIndex: i, annotationIndex: annIdx, type: "annotation" });
+                        }
+                      : undefined
+                  }
                 />
                 {/* Target Stub */}
                 <path
@@ -1104,7 +1117,46 @@ export default function Home() {
                   strokeWidth="2"
                   fill="none"
                   strokeDasharray="4"
+                  className={ann.guessed ? "pointer-events-auto cursor-pointer" : ""}
+                  onClick={
+                    ann.guessed
+                      ? (e) => {
+                          e.stopPropagation();
+                          setGuessConfirmation({ wordIndex: i, annotationIndex: annIdx, type: "annotation" });
+                        }
+                      : undefined
+                  }
                 />
+                {/* Question mark for guessed annotations */}
+                {ann.guessed && (
+                  <g
+                    className="pointer-events-auto cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setGuessConfirmation({ wordIndex: i, annotationIndex: annIdx, type: "annotation" });
+                    }}
+                  >
+                    <circle
+                      cx={sx + (sx < tx ? stubLength : -stubLength)}
+                      cy={sy + stubDown}
+                      r="8"
+                      fill="#fef3c7"
+                      stroke="#f59e0b"
+                      strokeWidth="2"
+                    />
+                    <text
+                      x={sx + (sx < tx ? stubLength : -stubLength)}
+                      y={sy + stubDown}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize="10"
+                      fontWeight="bold"
+                      fill="#92400e"
+                    >
+                      ?
+                    </text>
+                  </g>
+                )}
               </g>,
             );
           } else if (isAdjacent) {
@@ -1355,6 +1407,48 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const rerunAllHeuristics = () => {
+    if (analyzerWords.length === 0) return;
+    
+    setIsLoading(true);
+    setTimeout(() => {
+      const newWords = [...analyzerWords];
+      
+      // Clear all guessed annotations and selections
+      newWords.forEach(word => {
+        // Remove guessed annotations
+        word.annotations = word.annotations.filter(ann => !ann.guessed);
+        
+        // Clear guessed word selections
+        if (word.guessed) {
+          word.selectedEntry = undefined;
+          word.selectedMorphology = undefined;
+          word.guessed = false;
+          word.heuristic = undefined;
+        }
+        
+        // Clear guessed et prefixes
+        if (word.etGuessed) {
+          word.hasEtPrefix = false;
+          word.etGuessed = false;
+        }
+      });
+      
+      // Rerun all heuristics
+      applyNominativeChunkGuessing(newWords);
+      applyPrepositionalGuessing(newWords);
+      applyAdjectiveNounGuessing(newWords);
+      applyPrepositionalBracketGuessing(newWords);
+      applyReversePrepositionalBracketGuessing(newWords);
+      applyQueEtGuessing(newWords);
+      applyGenitiveHeuristic(newWords);
+      applyAdjacentAgreementGuessing(newWords);
+      
+      setAnalyzerWords(newWords);
+      setIsLoading(false);
+    }, 10);
   };
 
   const selectDefinition = (entry: WordEntry, morphology?: string) => {
@@ -1847,6 +1941,16 @@ export default function Home() {
                       );
                     })}
                   </div>
+                </CardContent>
+                <CardContent className="pt-0">
+                  <Button
+                    onClick={rerunAllHeuristics}
+                    disabled={isLoading}
+                    variant="outline"
+                    className="w-full"
+                  >
+                    {isLoading ? "Processing..." : "Rerun All Heuristics"}
+                  </Button>
                 </CardContent>
               </Card>
             )}

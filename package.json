@@ -11,7 +11,7 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
-    "build:binary": "cd whitakers-words && make clean && make && cp bin/words ../bin/words"
+    "build:binary": "cd whitakers-words && LDFLAGS='-static' make clean && make words && cp bin/words ../bin/words"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",

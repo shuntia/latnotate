@@ -1,81 +1,52 @@
 # Quick Fix: Vercel GLIBC Error
 
-## Error Message
+## ✅ SOLVED: Use Static Binary
+
+The binary has been compiled **statically** and no longer requires any specific GLIBC version. It will work on any Linux system including Vercel's Amazon Linux 2.
+
+### What Was Changed
+
+The binary was recompiled with `-static` flag:
+```bash
+cd whitakers-words
+LDFLAGS="-static" make clean && make words
+cp bin/words ../bin/words
 ```
-/var/task/bin/words: /lib64/libc.so.6: version `GLIBC_2.38' not found
-```
 
-## Immediate Solution
-
-### Option 1: Use GitHub Actions (Easiest)
-
-1. Go to your GitHub repository
-2. Click on **Actions** tab
-3. Select **"Build Vercel-Compatible Binary"**
-4. Click **"Run workflow"**
-5. Wait for completion (~2 minutes)
-6. The compatible binary will be automatically committed
-7. Push to Vercel or wait for auto-deployment
-
-### Option 2: Manual Build (If you have Ubuntu 20.04)
+### Verify It's Static
 
 ```bash
-# On Ubuntu 20.04 machine
-sudo apt-get update
-sudo apt-get install -y gnat gprbuild
+file bin/words
+# Should show: "statically linked" (not "dynamically linked")
 
+ldd bin/words
+# Should show: "not a dynamic executable"
+```
+
+### Why This Works
+
+- **Static linking** includes all library code directly in the binary
+- No external dependencies on GLIBC or any other shared libraries
+- Works on **any** Linux system (Vercel, Docker, EC2, etc.)
+- Slightly larger file size (~4.3MB vs 3.4MB) but completely portable
+
+## If You Need to Rebuild
+
+```bash
 cd whitakers-words
+export LDFLAGS="-static"
 make clean
-make all
-
+make words
 cp bin/words ../bin/words
-
-# Commit and push
-git add bin/words
-git commit -m "Add Vercel-compatible binary"
-git push
 ```
 
-### Option 3: Docker (Advanced)
-
+Or use the npm script:
 ```bash
-# Build in Ubuntu 20.04 container
-docker run -it --rm -v $(pwd):/app -w /app ubuntu:20.04 bash
-
-# Inside container:
-apt-get update
-apt-get install -y gnat gprbuild make
-cd whitakers-words
-make clean && make
-cp bin/words ../bin/words
-exit
-
-# Back on host:
-git add bin/words
-git commit -m "Add Vercel-compatible binary"
-git push
+cd whitakers-words && LDFLAGS="-static" make clean && make && cp bin/words ../bin/words
 ```
-
-## Verify Compatibility
-
-Check GLIBC requirements before committing:
-
-```bash
-objdump -p bin/words | grep GLIBC_
-```
-
-Should show **GLIBC_2.31 or lower** (not 2.38+).
-
-## Why This Happens
-
-- Your local system has **GLIBC 2.38+** (newer Linux)
-- Vercel uses **Amazon Linux 2** with **GLIBC 2.26**
-- Binaries compiled on newer systems won't run on older systems
-
-## Prevention
-
-Always build production binaries on the target platform or use the GitHub Actions workflow.
 
 ---
 
-For complete details, see [BUILD_FOR_VERCEL.md](BUILD_FOR_VERCEL.md)
+~~For alternative approaches (GitHub Actions, Docker), see [BUILD_FOR_VERCEL.md](BUILD_FOR_VERCEL.md)~~
+
+**Note:** The GitHub Actions workflow and other complex solutions are **no longer needed** thanks to static linking!

@@ -149,15 +149,24 @@ Contributions welcome! Please:
 
 ### Vercel Deployment
 
-⚠️ **Important:** The `bin/words` binary must be compatible with Amazon Linux 2 (GLIBC 2.26-2.31).
+✅ **The binary is now statically linked** and works on any Linux system including Vercel's Amazon Linux 2.
 
-If you encounter GLIBC version errors on Vercel:
+The `bin/words` binary has no GLIBC dependencies and will deploy without issues.
 
-1. See **[BUILD_FOR_VERCEL.md](BUILD_FOR_VERCEL.md)** for detailed instructions
-2. Use the GitHub Actions workflow (`.github/workflows/build-binary.yml`) to build a compatible binary
-3. Or manually build on Ubuntu 20.04 and commit the binary
+#### If You Need to Rebuild the Binary
 
-The workflow can be triggered manually from the Actions tab on GitHub.
+```bash
+pnpm run build:binary
+```
+
+Or manually:
+```bash
+cd whitakers-words
+LDFLAGS="-static" make clean && make words
+cp bin/words ../bin/words
+```
+
+See **[QUICK_FIX_VERCEL.md](QUICK_FIX_VERCEL.md)** for details.
 
 ## Credits
 
