@@ -44,7 +44,9 @@ describe("Incremental Heuristics", () => {
       // After selecting "ad", incremental heuristic should guess "urbem" as accusative
       expect(words[0].selectedEntry?.type).toBe("Other");
       expect(words[1].lookupResults).toHaveLength(1);
-      expect(words[1].lookupResults?.[0].morphologies[0].analysis).toContain("Accusative");
+      expect(words[1].lookupResults?.[0].morphologies[0].analysis).toContain(
+        "Accusative",
+      );
     });
 
     it("should guess preposition before selecting case", () => {
@@ -125,7 +127,8 @@ describe("Incremental Heuristics", () => {
           original: "ambulat",
           clean: "ambulat",
           selectedEntry: { type: "Verb" as const },
-          selectedMorphology: "Verb Present Active Indicative 3rd Person Singular",
+          selectedMorphology:
+            "Verb Present Active Indicative 3rd Person Singular",
           lookupResults: [],
           annotations: [],
         },
@@ -133,19 +136,23 @@ describe("Incremental Heuristics", () => {
 
       // After selecting "ambulat" as 3rd person singular, should guess "puella" nominative singular
       expect(words[1].selectedMorphology).toContain("3rd Person Singular");
-      expect(words[0].lookupResults?.[0].morphologies[0].analysis).toContain("Nominative Singular");
+      expect(words[0].lookupResults?.[0].morphologies[0].analysis).toContain(
+        "Nominative Singular",
+      );
     });
   });
 
   describe("Adjacent agreement", () => {
     it("should create connection between agreeing adjacent words", () => {
       const getCaseGenderNumber = (morph: string) => {
-        const caseMatch = morph.match(/Nominative|Accusative|Genitive|Dative|Ablative/);
+        const caseMatch = morph.match(
+          /Nominative|Accusative|Genitive|Dative|Ablative/,
+        );
         const genderMatch = morph.match(/Masculine|Feminine|Neuter/);
         const numberMatch = morph.match(/Singular|Plural/);
-        
+
         if (!caseMatch || !numberMatch) return null;
-        
+
         return {
           case: caseMatch[0],
           gender: genderMatch ? genderMatch[0] : "",
@@ -171,13 +178,15 @@ describe("Incremental Heuristics", () => {
     it("should only apply heuristics involving changed word", () => {
       // When user selects a word, only heuristics involving that word should run
       // This is tested by ensuring we don't guess words far away
-      
+
       const changedIndex = 5;
       const maxLookAhead = 4;
-      
+
       // Object should be within range
-      expect(changedIndex + maxLookAhead).toBeGreaterThanOrEqual(changedIndex + 1);
-      
+      expect(changedIndex + maxLookAhead).toBeGreaterThanOrEqual(
+        changedIndex + 1,
+      );
+
       // Words beyond range should not be affected
       const beyondRange = changedIndex + maxLookAhead + 1;
       expect(beyondRange).toBeGreaterThan(changedIndex + maxLookAhead);
@@ -185,15 +194,15 @@ describe("Incremental Heuristics", () => {
 
     it("should check both adjacent neighbors for agreement", () => {
       const changedIndex = 2;
-      
+
       // Should check left neighbor (index 1)
       const leftNeighbor = changedIndex - 1;
       expect(leftNeighbor).toBe(1);
-      
+
       // Should check right neighbor (index 3)
       const rightNeighbor = changedIndex + 1;
       expect(rightNeighbor).toBe(3);
-      
+
       // Should not check further
       expect(changedIndex - 2).toBeLessThan(leftNeighbor);
       expect(changedIndex + 2).toBeGreaterThan(rightNeighbor);

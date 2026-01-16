@@ -14,7 +14,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Latnotate - Latin Sentence Analyzer",
-  description: "Analyze Latin sentences and look up words using Whitaker's Words",
+  description:
+    "Analyze Latin sentences and look up words using Whitaker's Words",
 };
 
 export default function RootLayout({

@@ -27,7 +27,7 @@ const execFileAsync = promisify(execFile);
 
 // Helper function to remove accent marks from Latin text
 function removeAccents(text: string): string {
-  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
 const AGE_MAP: Record<string, Age> = {
@@ -479,7 +479,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     let wordsToLookup: string[] = [];
     const stream = body.stream === true;
-    
+
     if (body.words && Array.isArray(body.words)) wordsToLookup = body.words;
     else if (body.word) wordsToLookup = [body.word];
     else
@@ -496,7 +496,7 @@ export async function POST(req: NextRequest) {
     // If streaming is requested, use ReadableStream
     if (stream) {
       const encoder = new TextEncoder();
-      
+
       const readableStream = new ReadableStream({
         async start(controller) {
           for (const word of wordsToLookup) {
@@ -522,11 +522,12 @@ export async function POST(req: NextRequest) {
               });
 
               // Send each result as a separate JSON chunk
-              const chunk = JSON.stringify({ word, entries: parsed.entries }) + '\n';
+              const chunk =
+                JSON.stringify({ word, entries: parsed.entries }) + "\n";
               controller.enqueue(encoder.encode(chunk));
             } catch (error) {
               console.error(`Error looking up ${word}:`, error);
-              const chunk = JSON.stringify({ word, entries: [] }) + '\n';
+              const chunk = JSON.stringify({ word, entries: [] }) + "\n";
               controller.enqueue(encoder.encode(chunk));
             } finally {
               try {
@@ -542,8 +543,8 @@ export async function POST(req: NextRequest) {
 
       return new Response(readableStream, {
         headers: {
-          'Content-Type': 'application/x-ndjson',
-          'Transfer-Encoding': 'chunked',
+          "Content-Type": "application/x-ndjson",
+          "Transfer-Encoding": "chunked",
         },
       });
     }

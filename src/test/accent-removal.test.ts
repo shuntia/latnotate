@@ -6,7 +6,7 @@ import { describe, it, expect } from "vitest";
 
 // Mock the removeAccents function from the API route
 function removeAccents(text: string): string {
-  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
 describe("Accent Mark Removal", () => {

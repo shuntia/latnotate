@@ -234,11 +234,12 @@ describe("Rejected Heuristics Tracking", () => {
     // Simulate clearing all annotations (like Clear button does)
     for (const annotation of word.annotations) {
       if (annotation.guessed) {
-        const heuristicId = annotation.targetIndex !== undefined
-          ? `${annotation.type}-${annotation.targetIndex}`
-          : annotation.endIndex !== undefined
-          ? `${annotation.type}-${annotation.endIndex}`
-          : annotation.type;
+        const heuristicId =
+          annotation.targetIndex !== undefined
+            ? `${annotation.type}-${annotation.targetIndex}`
+            : annotation.endIndex !== undefined
+              ? `${annotation.type}-${annotation.endIndex}`
+              : annotation.type;
         word.rejectedHeuristics!.add(heuristicId);
       }
     }

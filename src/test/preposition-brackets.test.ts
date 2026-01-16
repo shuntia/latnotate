@@ -10,7 +10,7 @@ function createWord(
   original: string,
   type: string,
   morphology: string,
-  caseValue?: string
+  caseValue?: string,
 ): SentenceWord {
   const word: SentenceWord = {
     original,
@@ -18,7 +18,7 @@ function createWord(
     annotations: [],
     selectedEntry: {
       forms: [original],
-      type: type as any,
+      type: type as "Noun" | "Other",
       definition: "test",
       morphologies: [
         {
@@ -47,13 +47,13 @@ describe("Prepositional Bracket Extension", () => {
     ];
 
     // Simulate what the heuristic should detect
-    const prep = words[0];
+    // const prep = words[0];
     const object1 = words[1];
     const conjunction = words[2];
     const object2 = words[3];
 
     // Both objects are Ablative, should extend bracket to include conjunction and second object
-    const expectedEndIndex = 3; // Index of "foro"
+    // const expectedEndIndex = 3; // Index of "foro"
 
     // This tests the logic that should be in applyPrepositionalBracketGuessing
     expect(object1.selectedMorphology).toContain("Ablative");
@@ -69,7 +69,7 @@ describe("Prepositional Bracket Extension", () => {
       createWord("templum", "Noun", "Noun Accusative Singular Neuter"),
     ];
 
-    const prep = words[0];
+    // const prep = words[0];
     const object1 = words[1];
     const object2 = words[3];
 
@@ -88,7 +88,7 @@ describe("Prepositional Bracket Extension", () => {
     ];
 
     // Should extend from "templo" (index 2) across conjunction to "foro" (index 4)
-    const expectedEndIndex = 4;
+    // const expectedEndIndex = 4;
 
     expect(words[1].selectedMorphology).toContain("Ablative");
     expect(words[2].selectedMorphology).toContain("Ablative");
@@ -105,7 +105,7 @@ describe("Prepositional Bracket Extension", () => {
     ];
 
     // Should extend to include adjective + noun after conjunction
-    const expectedEndIndex = 4;
+    // const expectedEndIndex = 4;
 
     expect(words[1].selectedMorphology).toContain("Ablative");
     expect(words[3].selectedMorphology).toContain("Ablative");
@@ -121,7 +121,7 @@ describe("Prepositional Bracket Extension", () => {
     ];
 
     // Should extend bracket across conjunction for accusative case
-    const expectedEndIndex = 3;
+    // const expectedEndIndex = 3;
 
     expect(words[1].selectedMorphology).toContain("Accusative");
     expect(words[3].selectedMorphology).toContain("Accusative");
@@ -202,7 +202,7 @@ describe("Prepositional Bracket Creation", () => {
 
     // Check that annotation already exists
     const existingBracket = word.annotations.find(
-      (a) => a.type === "preposition-scope"
+      (a) => a.type === "preposition-scope",
     );
 
     expect(existingBracket).toBeDefined();

@@ -4,19 +4,19 @@ describe("Heuristic Guessing Logic", () => {
   describe("Verb Person/Number extraction", () => {
     it("should extract 3rd person singular", () => {
       const morph = "Verb Present Active Indicative 3rd Person Singular";
-      
+
       const getVerbPersonNumber = (m: string) => {
         if (!m.includes("Person")) return null;
-        
+
         let person = 0;
         if (m.includes("1st Person")) person = 1;
         else if (m.includes("2nd Person")) person = 2;
         else if (m.includes("3rd Person")) person = 3;
-        
+
         let number: "S" | "P" | null = null;
         if (m.includes("Singular")) number = "S";
         else if (m.includes("Plural")) number = "P";
-        
+
         if (person > 0 && number) return { person, number };
         return null;
       };
@@ -27,19 +27,19 @@ describe("Heuristic Guessing Logic", () => {
 
     it("should extract 3rd person plural", () => {
       const morph = "Verb Present Active Indicative 3rd Person Plural";
-      
+
       const getVerbPersonNumber = (m: string) => {
         if (!m.includes("Person")) return null;
-        
+
         let person = 0;
         if (m.includes("1st Person")) person = 1;
         else if (m.includes("2nd Person")) person = 2;
         else if (m.includes("3rd Person")) person = 3;
-        
+
         let number: "S" | "P" | null = null;
         if (m.includes("Singular")) number = "S";
         else if (m.includes("Plural")) number = "P";
-        
+
         if (person > 0 && number) return { person, number };
         return null;
       };
@@ -50,19 +50,19 @@ describe("Heuristic Guessing Logic", () => {
 
     it("should return null for infinitives", () => {
       const morph = "Verb Present Active Infinitive";
-      
+
       const getVerbPersonNumber = (m: string) => {
         if (!m.includes("Person")) return null;
-        
+
         let person = 0;
         if (m.includes("1st Person")) person = 1;
         else if (m.includes("2nd Person")) person = 2;
         else if (m.includes("3rd Person")) person = 3;
-        
+
         let number: "S" | "P" | null = null;
         if (m.includes("Singular")) number = "S";
         else if (m.includes("Plural")) number = "P";
-        
+
         if (person > 0 && number) return { person, number };
         return null;
       };
@@ -75,14 +75,16 @@ describe("Heuristic Guessing Logic", () => {
   describe("Case/Gender/Number extraction", () => {
     it("should extract nominative singular feminine", () => {
       const morph = "Noun 1st Declension Nominative Singular Feminine";
-      
+
       const getCaseGenderNumber = (m: string) => {
-        const caseMatch = m.match(/Nominative|Accusative|Genitive|Dative|Ablative|Vocative|Locative/);
+        const caseMatch = m.match(
+          /Nominative|Accusative|Genitive|Dative|Ablative|Vocative|Locative/,
+        );
         const genderMatch = m.match(/Masculine|Feminine|Neuter|Common/);
         const numberMatch = m.match(/Singular|Plural/);
-        
+
         if (!caseMatch || !numberMatch) return null;
-        
+
         return {
           case: caseMatch[0],
           gender: genderMatch ? genderMatch[0] : "",
@@ -100,14 +102,16 @@ describe("Heuristic Guessing Logic", () => {
 
     it("should handle missing gender", () => {
       const morph = "Noun Accusative Plural";
-      
+
       const getCaseGenderNumber = (m: string) => {
-        const caseMatch = m.match(/Nominative|Accusative|Genitive|Dative|Ablative|Vocative|Locative/);
+        const caseMatch = m.match(
+          /Nominative|Accusative|Genitive|Dative|Ablative|Vocative|Locative/,
+        );
         const genderMatch = m.match(/Masculine|Feminine|Neuter|Common/);
         const numberMatch = m.match(/Singular|Plural/);
-        
+
         if (!caseMatch || !numberMatch) return null;
-        
+
         return {
           case: caseMatch[0],
           gender: genderMatch ? genderMatch[0] : "",
@@ -213,13 +217,13 @@ describe("Heuristic Guessing Logic", () => {
     it("should identify adjective-noun pairs", () => {
       const word1Type = "Adjective";
       const word2Type = "Noun";
-      
+
       const isAdjNounPair = (t1: string, t2: string) => {
         const t1IsAdj = t1 === "Adjective" || t1 === "Participle";
         const t2IsNoun = t2 === "Noun";
         const t1IsNoun = t1 === "Noun";
         const t2IsAdj = t2 === "Adjective" || t2 === "Participle";
-        
+
         return (t1IsAdj && t2IsNoun) || (t1IsNoun && t2IsAdj);
       };
 
@@ -229,13 +233,13 @@ describe("Heuristic Guessing Logic", () => {
     it("should reject adjective-adjective pairs", () => {
       const word1Type = "Adjective";
       const word2Type = "Adjective";
-      
+
       const isAdjNounPair = (t1: string, t2: string) => {
         const t1IsAdj = t1 === "Adjective" || t1 === "Participle";
         const t2IsNoun = t2 === "Noun";
         const t1IsNoun = t1 === "Noun";
         const t2IsAdj = t2 === "Adjective" || t2 === "Participle";
-        
+
         return (t1IsAdj && t2IsNoun) || (t1IsNoun && t2IsAdj);
       };
 
@@ -245,13 +249,13 @@ describe("Heuristic Guessing Logic", () => {
     it("should identify participle as adjective-like", () => {
       const word1Type = "Participle";
       const word2Type = "Noun";
-      
+
       const isAdjNounPair = (t1: string, t2: string) => {
         const t1IsAdj = t1 === "Adjective" || t1 === "Participle";
         const t2IsNoun = t2 === "Noun";
         const t1IsNoun = t1 === "Noun";
         const t2IsAdj = t2 === "Adjective" || t2 === "Participle";
-        
+
         return (t1IsAdj && t2IsNoun) || (t1IsNoun && t2IsAdj);
       };
 
@@ -263,32 +267,32 @@ describe("Heuristic Guessing Logic", () => {
     it("should identify preposition with accusative object", () => {
       const prepForm = "ad";
       const objectCase = "Accusative";
-      
+
       const PREP_CASE_MAP: Record<string, string[]> = {
         ad: ["Accusative"],
         cum: ["Ablative"],
         in: ["Accusative", "Ablative"],
       };
-      
+
       const requiredCases = PREP_CASE_MAP[prepForm];
       const matches = requiredCases && requiredCases.includes(objectCase);
-      
+
       expect(matches).toBe(true);
     });
 
     it("should identify preposition with ablative object", () => {
       const prepForm = "cum";
       const objectCase = "Ablative";
-      
+
       const PREP_CASE_MAP: Record<string, string[]> = {
         ad: ["Accusative"],
         cum: ["Ablative"],
         in: ["Accusative", "Ablative"],
       };
-      
+
       const requiredCases = PREP_CASE_MAP[prepForm];
       const matches = requiredCases && requiredCases.includes(objectCase);
-      
+
       expect(matches).toBe(true);
     });
 
@@ -296,17 +300,17 @@ describe("Heuristic Guessing Logic", () => {
       const prepForm = "in";
       const objectCaseAcc = "Accusative";
       const objectCaseAbl = "Ablative";
-      
+
       const PREP_CASE_MAP: Record<string, string[]> = {
         ad: ["Accusative"],
         cum: ["Ablative"],
         in: ["Accusative", "Ablative"],
       };
-      
+
       const requiredCases = PREP_CASE_MAP[prepForm];
       const matchesAcc = requiredCases && requiredCases.includes(objectCaseAcc);
       const matchesAbl = requiredCases && requiredCases.includes(objectCaseAbl);
-      
+
       expect(matchesAcc).toBe(true);
       expect(matchesAbl).toBe(true);
     });
@@ -315,37 +319,37 @@ describe("Heuristic Guessing Logic", () => {
   describe("-que tackon 'et' detection", () => {
     it("should identify -que tackon", () => {
       const modifications = [
-        { type: "Tackon", form: "que", definition: "and" }
+        { type: "Tackon", form: "que", definition: "and" },
       ];
-      
+
       const hasQueTackon = modifications.some(
-        (m) => m.type === "Tackon" && m.form.toLowerCase() === "que"
+        (m) => m.type === "Tackon" && m.form.toLowerCase() === "que",
       );
-      
+
       expect(hasQueTackon).toBe(true);
     });
 
     it("should not match other tackons", () => {
       const modifications = [
-        { type: "Tackon", form: "ne", definition: "question particle" }
+        { type: "Tackon", form: "ne", definition: "question particle" },
       ];
-      
+
       const hasQueTackon = modifications.some(
-        (m) => m.type === "Tackon" && m.form.toLowerCase() === "que"
+        (m) => m.type === "Tackon" && m.form.toLowerCase() === "que",
       );
-      
+
       expect(hasQueTackon).toBe(false);
     });
 
     it("should not match prefix", () => {
       const modifications = [
-        { type: "Prefix", form: "que", definition: "some prefix" }
+        { type: "Prefix", form: "que", definition: "some prefix" },
       ];
-      
+
       const hasQueTackon = modifications.some(
-        (m) => m.type === "Tackon" && m.form.toLowerCase() === "que"
+        (m) => m.type === "Tackon" && m.form.toLowerCase() === "que",
       );
-      
+
       expect(hasQueTackon).toBe(false);
     });
   });

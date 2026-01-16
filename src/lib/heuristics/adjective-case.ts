@@ -14,7 +14,8 @@ export const applyAdjectiveCaseGuessing = (words: SentenceWord[]): void => {
     if (!adjWord.lookupResults || adjWord.lookupResults.length === 0) continue;
 
     const guaranteedPOS = getGuaranteedPOS(adjWord);
-    if (guaranteedPOS !== "Adjective" && guaranteedPOS !== "Participle") continue;
+    if (guaranteedPOS !== "Adjective" && guaranteedPOS !== "Participle")
+      continue;
 
     // Check if adjective case guess was previously rejected
     if (adjWord.rejectedHeuristics?.has("adjective-case-guess")) continue;
@@ -62,7 +63,7 @@ export const applyAdjectiveCaseGuessing = (words: SentenceWord[]): void => {
           adjWord.annotations.push({
             type: "modify",
             targetIndex: nounIdx,
-            guessed: true,
+            
             heuristic: `Agreeing with "${nounWord.original}"`,
           });
 

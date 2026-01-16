@@ -102,7 +102,8 @@ describe("types", () => {
           line: "am.o V 1 1 PRES ACTIVE IND 1 S",
           stem: "am.o",
           pos: "V",
-          analysis: "Verb 1st Conjugation Present Active Indicative 1st Person Singular",
+          analysis:
+            "Verb 1st Conjugation Present Active Indicative 1st Person Singular",
         },
       ],
       definition: "love, like",

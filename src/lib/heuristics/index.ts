@@ -23,7 +23,6 @@ export { applyDativeIndirectObjectHeuristic } from "./dative";
 export { applyAppositionHeuristic } from "./apposition";
 export { applyAccusativeInfinitiveHeuristic } from "./accusative-infinitive";
 export {
-  applyTemporalClauseHeuristic,
   applyComparativeHeuristic,
 } from "./clauses";
 export {
@@ -43,3 +42,13 @@ export { applyPurposeClauseHeuristic } from "./purpose-clause";
 export { applySumHeuristic } from "./sum";
 export { applyAdjectiveAgreementInference } from "./adjective-agreement-inference";
 export { applyParticipleBraceHeuristic } from "./participle-brace";
+export { applyInfinitiveHeuristic } from "./infinitive";
+
+// Heuristic invalidation
+export {
+  detectChanges,
+  getInvalidatedHeuristics,
+  undoHeuristicsForWord,
+  undoDependentHeuristics,
+} from "./invalidation";
+export type { HeuristicType, HeuristicMetadata } from "./invalidation";

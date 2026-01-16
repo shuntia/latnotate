@@ -18,7 +18,8 @@ describe("API Integration", () => {
                     line: "puella N 1 1 NOM S F",
                     stem: "puell.a",
                     pos: "N",
-                    analysis: "Noun 1st Declension Nominative Singular Feminine",
+                    analysis:
+                      "Noun 1st Declension Nominative Singular Feminine",
                   },
                 ],
                 definition: "girl, maiden",
@@ -145,7 +146,9 @@ describe("API Integration", () => {
         const cleanInput = inputWord.toLowerCase();
 
         // Form match
-        const formMatch = entry.forms.some((f) => f.toLowerCase() === cleanInput);
+        const formMatch = entry.forms.some(
+          (f) => f.toLowerCase() === cleanInput,
+        );
         if (formMatch) score += 200;
 
         // Morphology match

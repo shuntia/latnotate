@@ -1,4 +1,6 @@
-import { WordEntry } from "@/lib/types";
+import { WordEntry, Morphology } from "@/lib/types";
+
+export type { WordEntry, Morphology };
 
 export type TagType =
   | "NOM"
@@ -46,7 +48,8 @@ export interface SentenceWord {
   adjacentGuessed?: boolean; // Whether the adjacent connection was heuristically guessed
   rejectedHeuristics?: Set<string>; // Track rejected heuristics to avoid reapplying
   dependentWords?: Set<number>; // Indices of words whose heuristics depend on this word
-  override?: { // Manual override of word type
+  override?: {
+    // Manual override of word type
     type: string; // e.g., "Noun", "Verb", "Adjective"
     morphology?: string; // e.g., "Genitive Singular", "Accusative Plural"
     manual: boolean;

@@ -69,7 +69,7 @@ describe("Whitakers Words Parser", () => {
 
       const code = "XCXAO";
       const age = AGE_MAP[code[0]];
-      
+
       expect(age).toBe("Any Age");
       expect(code.length).toBe(5);
     });
@@ -86,7 +86,9 @@ describe("Whitakers Words Parser", () => {
       ];
 
       dictionaryLines.forEach(({ line, expected }) => {
-        const posMatch = line.match(/\b(N|V|ADJ|ADV|PRON|PREP|CONJ|INTERJ|NUM)\b/);
+        const posMatch = line.match(
+          /\b(N|V|ADJ|ADV|PRON|PREP|CONJ|INTERJ|NUM)\b/,
+        );
         expect(posMatch?.[1]).toBe(expected);
       });
     });

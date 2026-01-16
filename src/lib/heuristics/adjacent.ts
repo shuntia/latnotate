@@ -32,14 +32,14 @@ export const applyAdjacentAgreementGuessing = (words: SentenceWord[]): void => {
         word1.annotations.push({
           type: "modify",
           targetIndex: i + 1,
-          guessed: true,
+          
           heuristic: `Agreement: ${cgn1.case} ${cgn1.number}${cgn1.gender ? " " + cgn1.gender : ""}`,
         });
-        
+
         // Mark word1 as having an adjacent connection
         word1.hasAdjacentConnection = true;
         word1.adjacentGuessed = true;
-        
+
         // Track mutual dependency for adjacent connections
         if (!word1.dependentWords) word1.dependentWords = new Set();
         if (!word2.dependentWords) word2.dependentWords = new Set();

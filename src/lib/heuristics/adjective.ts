@@ -38,10 +38,10 @@ export const applyAdjectiveNounGuessing = (words: SentenceWord[]): void => {
       // Connect adjective to noun
       const fromIdx = word1IsAdj ? i : i + 1;
       const toIdx = word1IsAdj ? i + 1 : i;
-      
+
       // Check if this specific connection was previously rejected
       if (words[fromIdx].rejectedHeuristics?.has(`modify-${toIdx}`)) continue;
-      
+
       const existingConn = words[fromIdx].annotations.find(
         (a) => a.type === "modify" && a.targetIndex === toIdx,
       );
@@ -50,12 +50,13 @@ export const applyAdjectiveNounGuessing = (words: SentenceWord[]): void => {
         words[fromIdx].annotations.push({
           type: "modify",
           targetIndex: toIdx,
-          guessed: true,
+          
           heuristic: `Adjective/participle modifying noun: ${cgn1.case} ${cgn1.number}${cgn1.gender ? " " + cgn1.gender : ""}`,
         });
-        
+
         // Track that the adjective depends on the noun
-        if (!words[toIdx].dependentWords) words[toIdx].dependentWords = new Set();
+        if (!words[toIdx].dependentWords)
+          words[toIdx].dependentWords = new Set();
         words[toIdx].dependentWords.add(fromIdx);
       }
     }

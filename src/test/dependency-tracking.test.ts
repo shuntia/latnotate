@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 
 /**
  * Tests for heuristic dependency tracking
- * 
+ *
  * When a word is selected, any heuristics that depend on that word should be rerun.
  * For example:
  * - If a genitive points to a noun, changing the noun should rerun genitive heuristic
@@ -34,7 +34,7 @@ describe("Heuristic Dependency Tracking", () => {
             type: "possession" as const,
             targetIndex: 0,
             guessed: true,
-            heuristic: "Genitive noun modifying guaranteed noun \"puella\"",
+            heuristic: 'Genitive noun modifying guaranteed noun "puella"',
           },
         ],
         selectedEntry: { type: "Noun", word: "Roma", morphologies: [] },
@@ -175,7 +175,8 @@ describe("Heuristic Dependency Tracking", () => {
         index: 1,
         annotations: [],
         selectedEntry: { type: "Verb", word: "ambulo", morphologies: [] },
-        selectedMorphology: "Verb Present Active Indicative 3rd Person Singular",
+        selectedMorphology:
+          "Verb Present Active Indicative 3rd Person Singular",
         dependentWords: new Set<number>([0]),
       },
     ];
