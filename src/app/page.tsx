@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { X, ArrowRight, RefreshCw, Sparkles, Layers, Save, Upload } from "lucide-react";
+import { X, ArrowRight, RefreshCw, Save, Upload, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { InfinitySpin, Triangle } from "react-loader-spinner";
 import { Navigation } from "@/components/Navigation";
 import { Toaster, toast } from "sonner";
@@ -77,11 +77,13 @@ export default function Home() {
   const [analyzerWords, setAnalyzerWords] = useState<SentenceWord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showSidePane, setShowSidePane] = useState(true);
 
   // Selection / Interaction State
   const [selectedWordIndex, setSelectedWordIndex] = useState<number | null>(
     null,
   ); // For Dialog
+  const [focusedEntryIndex, setFocusedEntryIndex] = useState<number>(0); // For keyboard navigation
   const [activeTab, setActiveTab] = useState("analyzer");
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [interactionMode, setInteractionMode] = useState<{
@@ -99,13 +101,83 @@ export default function Home() {
   );
   const [overrideType, setOverrideType] = useState<string>("");
   const [overrideMorphology, setOverrideMorphology] = useState<string>("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // Non-blocking badge for incremental updates
+  const [isBlockingRecalc, setIsBlockingRecalc] = useState(false); // Blocking for full recalc
 
   // Layout refs for SVG drawing
   const wordRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [lines, setLines] = useState<React.ReactNode[]>([]);
   const [maxLineDepth, setMaxLineDepth] = useState(0);
+
+  // Keyboard navigation for definitions and word selection
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Left/Right arrow navigation for words (works even when no word selected)
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        if (analyzerWords.length === 0) return;
+        
+        e.preventDefault();
+        
+        if (selectedWordIndex === null) {
+          // No word selected, select first word
+          setSelectedWordIndex(0);
+          setFocusedEntryIndex(0);
+        } else {
+          // Move to next/previous word
+          if (e.key === "ArrowRight") {
+            const nextIndex = Math.min(selectedWordIndex + 1, analyzerWords.length - 1);
+            setSelectedWordIndex(nextIndex);
+            setFocusedEntryIndex(0);
+          } else {
+            const prevIndex = Math.max(selectedWordIndex - 1, 0);
+            setSelectedWordIndex(prevIndex);
+            setFocusedEntryIndex(0);
+          }
+        }
+        return;
+      }
+      
+      // Up/Down/Enter/Escape only work when a word is selected
+      if (selectedWordIndex === null) return;
+      
+      const word = analyzerWords[selectedWordIndex];
+      if (!word || !word.lookupResults || word.lookupResults.length === 0) return;
+      
+      const entries = word.lookupResults;
+      
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setFocusedEntryIndex(prev => Math.min(prev + 1, entries.length - 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setFocusedEntryIndex(prev => Math.max(prev - 1, 0));
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const entry = entries[focusedEntryIndex];
+        if (entry) {
+          if (entry.morphologies.length === 0) {
+            selectDefinition(entry);
+          } else if (entry.morphologies.length === 1) {
+            selectDefinition(entry, entry.morphologies[0].analysis);
+          }
+          // If multiple morphologies, user needs to click one
+        }
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        setSelectedWordIndex(null);
+      }
+    };
+    
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedWordIndex, focusedEntryIndex, analyzerWords]);
+  
+  // Reset focused entry when word changes
+  useEffect(() => {
+    setFocusedEntryIndex(0);
+  }, [selectedWordIndex]);
 
   // Close context menu on click elsewhere
   useEffect(() => {
@@ -129,6 +201,7 @@ export default function Home() {
       targetX: number;
       targetY: number;
       horizontalDistance: number;
+      linesCrossed: number; // Number of text lines this connection spans
     }
     
     const multilineConnections: MultilineConnection[] = [];
@@ -151,7 +224,9 @@ export default function Home() {
         const ty = targetRect.bottom - containerRect.top;
         
         const lineHeight = 40;
-        if (Math.abs(sy - ty) > lineHeight) {
+        const yDiff = Math.abs(sy - ty);
+        if (yDiff > lineHeight) {
+          const linesCrossed = Math.floor(yDiff / lineHeight);
           multilineConnections.push({
             wordIndex: i,
             annIndex: annIdx,
@@ -160,18 +235,25 @@ export default function Home() {
             targetX: tx,
             targetY: ty,
             horizontalDistance: Math.abs(tx - sx),
+            linesCrossed: linesCrossed,
           });
         }
       });
     });
     
-    // Sort by horizontal distance (longest first) so they get deepest positions
-    multilineConnections.sort((a, b) => b.horizontalDistance - a.horizontalDistance);
+    // Sort by lines crossed (most lines first), then by horizontal distance
+    // Longer connections that cross more lines should be outermost
+    multilineConnections.sort((a, b) => {
+      if (b.linesCrossed !== a.linesCrossed) {
+        return b.linesCrossed - a.linesCrossed;
+      }
+      return b.horizontalDistance - a.horizontalDistance;
+    });
     
-    // Assign depths - longer connections get deeper positions (outer)
+    // Assign depths - connections that cross more lines get deeper positions
     const depthMap = new Map<string, number>();
-    const baseDepth = 15;
-    const depthIncrement = 8; // Reduced from 20 to make lines closer
+    const baseDepth = 12; // Reduced to conserve space
+    const depthIncrement = 6; // Reduced to make lines closer
     multilineConnections.forEach((conn, idx) => {
       const key = `${conn.wordIndex}-${conn.annIndex}`;
       depthMap.set(key, baseDepth + (idx * depthIncrement));
@@ -667,7 +749,7 @@ export default function Home() {
                   if (!heuristicsStarted) {
                     heuristicsStarted = true;
                     setLoading(false);
-                    setIsLoading(true);
+                    setIsBlockingRecalc(true); // Use blocking for initial pass
                   }
 
                   // Find sentence start (after previous separator or beginning)
@@ -728,7 +810,7 @@ export default function Home() {
         // Ensure we've switched to heuristic phase
         if (!heuristicsStarted) {
           setLoading(false);
-          setIsLoading(true);
+          setIsBlockingRecalc(true); // Use blocking for initial pass
         }
 
         // Helper to apply heuristics and update UI
@@ -776,7 +858,7 @@ export default function Home() {
         await applyAndUpdate(applyVocativeHeuristic);
         await applyAndUpdate(applyPurposeClauseHeuristic);
 
-        setIsLoading(false);
+        setIsBlockingRecalc(false); // End blocking for initial pass
       } else {
         // Dictionary mode - use non-streaming
         const res = await fetch("/api/lookup", {
@@ -863,7 +945,7 @@ export default function Home() {
   const reAnalyzeAllHeuristics = async () => {
     if (analyzerWords.length === 0) return;
 
-    setIsLoading(true);
+    setIsBlockingRecalc(true);
     
     const newWords = [...analyzerWords];
 
@@ -947,7 +1029,7 @@ export default function Home() {
     await applyAndUpdate(applyVocativeHeuristic);
     await applyAndUpdate(applyPurposeClauseHeuristic);
 
-    setIsLoading(false);
+    setIsBlockingRecalc(false);
     
     toast.success("Re-analyzed all heuristics", {
       description: "All heuristic inferences cleared and recalculated. Manual selections preserved.",
@@ -1207,10 +1289,55 @@ export default function Home() {
       heuristic: undefined, // Clear heuristic explanation
     };
 
-    // Apply incremental heuristics for this word
+    // Find sentence boundaries for this word
+    const findSentenceBounds = (wordIndex: number): [number, number] => {
+      let start = 0;
+      let end = updatedWords.length - 1;
+      
+      // Helper to check if word is a sentence separator
+      const isSeparator = (word: SentenceWord): boolean => {
+        const cleaned = word.original.trim();
+        return cleaned === "." || cleaned === "!" || cleaned === "?" ||
+               cleaned === ";" || cleaned === ":" ||
+               word.original === '"' || word.original === "'" ||
+               word.original === "«" || word.original === "»";
+      };
+      
+      // Find start (go backward to find previous separator)
+      for (let i = wordIndex - 1; i >= 0; i--) {
+        if (isSeparator(updatedWords[i])) {
+          start = i + 1;
+          break;
+        }
+      }
+      
+      // Find end (go forward to find next separator)
+      for (let i = wordIndex + 1; i < updatedWords.length; i++) {
+        if (isSeparator(updatedWords[i])) {
+          end = i - 1;
+          break;
+        }
+      }
+      
+      return [start, end];
+    };
+    
+    const [sentenceStart, sentenceEnd] = findSentenceBounds(selectedWordIndex);
+
+    // Apply incremental heuristics to the whole sentence
     setIsLoading(true);
     setTimeout(() => {
-      applyIncrementalHeuristics(updatedWords, selectedWordIndex);
+      // Extract sentence
+      const sentenceWords = updatedWords.slice(sentenceStart, sentenceEnd + 1);
+      
+      // Apply all heuristics to the sentence
+      applyIncrementalHeuristics(sentenceWords, selectedWordIndex - sentenceStart);
+      
+      // Merge back
+      for (let i = 0; i < sentenceWords.length; i++) {
+        updatedWords[sentenceStart + i] = sentenceWords[i];
+      }
+      
       setAnalyzerWords(updatedWords);
       setIsLoading(false);
     }, 10);
@@ -1575,23 +1702,31 @@ export default function Home() {
     return el;
   };
 
-  // Pre-calculate bracket positions with guess information
-  const openBrackets = new Set<number>();
+  // Pre-calculate bracket positions with guess and case information
+  const openBrackets = new Map<number, string>(); // index -> case ("Accusative" or "Ablative")
   const closeBrackets = new Map<
     number,
-    { guessed: boolean; wordIndex: number; annotationIndex: number }
+    { guessed: boolean; wordIndex: number; annotationIndex: number; case: string }
   >();
   analyzerWords.forEach((w, wordIdx) => {
     w.annotations.forEach((a, annIdx) => {
       if (a.type === "preposition-scope") {
+        // Determine the case by checking the preposition word
+        let prepCase = "Ablative"; // default
+        if (w.selectedMorphology) {
+          if (w.selectedMorphology.includes("Accusative") || w.selectedMorphology.includes("ACC")) {
+            prepCase = "Accusative";
+          }
+        }
         // Bracket starts BEFORE the preposition (index w.index)
-        openBrackets.add(w.index);
+        openBrackets.set(w.index, prepCase);
         // Bracket ends AFTER the target (index a.endIndex)
         if (a.endIndex !== undefined) {
           closeBrackets.set(a.endIndex, {
             guessed: a.guessed || false,
             wordIndex: wordIdx,
             annotationIndex: annIdx,
+            case: prepCase,
           });
         }
       }
@@ -1613,26 +1748,50 @@ export default function Home() {
         }
       `}</style>
 
-      {/* Loading Spinner Overlay */}
-      {(loading || isLoading) && (
+      {/* Non-blocking Loading Spinner Badge */}
+      {/* Loading Spinner for incremental heuristic calculation */}
+      {isLoading && (
+        <div className="fixed top-20 right-4 z-50 bg-white p-3 rounded-lg shadow-lg flex items-center gap-2 border border-blue-200">
+          <Triangle
+            height="24"
+            width="24"
+            color="#3b82f6"
+            ariaLabel="triangle-loading"
+          />
+          <span className="text-sm font-medium text-gray-700">
+            Calculating heuristics...
+          </span>
+        </div>
+      )}
+
+      {/* Blocking overlay for full recalculation */}
+      {isBlockingRecalc && (
         <div className="fixed inset-0 bg-black/20 z-50 flex items-center justify-center">
           <div className="bg-white p-6 rounded-lg shadow-xl flex flex-col items-center gap-3">
-            {loading ? (
-              <InfinitySpin
-                width="200"
-                color="#3b82f6"
-                ariaLabel="infinity-spin-loading"
-              />
-            ) : (
-              <Triangle
-                height="80"
-                width="80"
-                color="#3b82f6"
-                ariaLabel="triangle-loading"
-              />
-            )}
+            <Triangle
+              height="80"
+              width="80"
+              color="#3b82f6"
+              ariaLabel="triangle-loading"
+            />
             <p className="text-sm font-medium text-gray-700">
-              {loading ? "Looking up words..." : "Calculating heuristics..."}
+              Analyzing sentence...
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Loading Spinner for dictionary lookups */}
+      {loading && (
+        <div className="fixed inset-0 bg-black/20 z-50 flex items-center justify-center">
+          <div className="bg-white p-6 rounded-lg shadow-xl flex flex-col items-center gap-3">
+            <InfinitySpin
+              width="200"
+              color="#3b82f6"
+              ariaLabel="infinity-spin-loading"
+            />
+            <p className="text-sm font-medium text-gray-700">
+              Looking up words...
             </p>
           </div>
         </div>
@@ -1680,7 +1839,7 @@ export default function Home() {
         </defs>
       </svg>
 
-      <div className="max-w-6xl w-full space-y-6">
+      <div className={`w-full ${analyzerWords.length > 0 && activeTab === "analyzer" ? "max-w-full px-4" : "max-w-6xl"} space-y-6`}>
         <div className="text-center mb-6">
           <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent mb-2">
             Latnotate
@@ -1747,25 +1906,42 @@ export default function Home() {
 
           <TabsContent value="analyzer">
             {analyzerWords.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Analysis</CardTitle>
-                </CardHeader>
-                <CardContent
-                  className="relative min-h-[300px]"
-                  ref={containerRef}
-                >
-                  {/* SVG Overlay */}
-                  <svg className="absolute inset-0 w-full h-full z-0 overflow-visible">
-                    {lines}
-                  </svg>
-
-                  <div
-                    className={`flex flex-wrap gap-x-3 gap-y-10 text-xl leading-loose relative z-10 p-4 pt-6`}
-                    style={{
-                      paddingBottom: `${Math.max(32, maxLineDepth * 1.5 + 30)}px`, // Increased multiplier for better spacing
-                    }}
+              <div className="flex gap-1 min-h-[600px]">
+                {/* Left side: Sentence (50% or 100% if side pane hidden) */}
+                <Card className="flex-1 flex flex-col">
+                  <CardHeader className="pb-3">
+                    <div className="flex justify-between items-center">
+                      <CardTitle>Analysis</CardTitle>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowSidePane(!showSidePane)}
+                        className="h-8 w-8 p-0"
+                        title={showSidePane ? "Hide definitions panel" : "Show definitions panel"}
+                      >
+                        {showSidePane ? (
+                          <PanelRightClose className="h-4 w-4" />
+                        ) : (
+                          <PanelRightOpen className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent
+                    className="relative flex-1 overflow-y-auto"
+                    ref={containerRef}
                   >
+                    {/* SVG Overlay */}
+                    <svg className="absolute inset-0 w-full h-full z-0 overflow-visible">
+                      {lines}
+                    </svg>
+
+                    <div
+                      className={`flex flex-wrap gap-x-3 gap-y-10 text-xl leading-loose relative z-10 p-4 pt-6`}
+                      style={{
+                        paddingBottom: `${Math.max(32, maxLineDepth * 1.5 + 30)}px`, // Increased multiplier for better spacing
+                      }}
+                    >
                     {analyzerWords.map((word, i) => {
                       const hasResults =
                         word.lookupResults && word.lookupResults.length > 0;
@@ -1798,6 +1974,10 @@ export default function Home() {
                                 )}
 
                                 {openBrackets.has(i) && (() => {
+                                  const prepCase = openBrackets.get(i) || "Ablative";
+                                  const isAccusative = prepCase === "Accusative";
+                                  const bracketColor = isAccusative ? "text-blue-600 hover:text-blue-800" : "text-amber-600 hover:text-amber-800";
+                                  
                                   // Find which preposition owns this bracket
                                   let prepIndex = -1;
                                   let annIndex = -1;
@@ -1812,8 +1992,8 @@ export default function Home() {
                                   
                                   return (
                                     <span 
-                                      className="text-amber-600 font-bold text-2xl mr-1 select-none cursor-pointer hover:text-amber-800"
-                                      title="Click to remove bracket"
+                                      className={`${bracketColor} font-bold text-2xl mr-1 select-none cursor-pointer`}
+                                      title={`${isAccusative ? 'Accusative' : 'Ablative'} preposition - Click to remove bracket`}
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         if (prepIndex !== -1 && annIndex !== -1) {
@@ -1848,6 +2028,7 @@ export default function Home() {
                                                                 py-0.5 rounded cursor-pointer select-none inline-block
                                                                 ${getWordStyle(word)}
                                                                 ${interactionMode ? "hover:ring-2 ring-indigo-500" : ""}
+                                                                ${selectedWordIndex === i ? "ring-4 ring-indigo-500 ring-offset-2" : ""}
                                                                 ${getWordPadding()}
                                                             `}
                                   style={
@@ -1865,11 +2046,14 @@ export default function Home() {
                                 {closeBrackets.has(i) &&
                                   (() => {
                                     const bracketInfo = closeBrackets.get(i)!;
+                                    const isAccusative = bracketInfo.case === "Accusative";
+                                    const bracketColor = isAccusative ? "text-blue-600 hover:text-blue-800" : "text-amber-600 hover:text-amber-800";
+                                    
                                     return (
                                       <span className="inline-flex items-center ml-1 select-none">
                                         <span 
-                                          className="text-amber-600 font-bold text-2xl cursor-pointer hover:text-amber-800"
-                                          title="Click to remove bracket"
+                                          className={`${bracketColor} font-bold text-2xl cursor-pointer`}
+                                          title={`${isAccusative ? 'Accusative' : 'Ablative'} preposition - Click to remove bracket`}
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             const newWords = [...analyzerWords];
@@ -1948,21 +2132,21 @@ export default function Home() {
                 <CardContent className="pt-0 space-y-2">
                   <Button
                     onClick={rerunAllHeuristics}
-                    disabled={isLoading}
+                    disabled={isLoading || isBlockingRecalc}
                     variant="outline"
                     className="w-full"
                   >
                     <RefreshCw className="h-4 w-4 mr-2" />
-                    {isLoading ? "Processing..." : "Rerun All Heuristics"}
+                    {isLoading || isBlockingRecalc ? "Processing..." : "Rerun All Heuristics"}
                   </Button>
                   <Button
                     onClick={reAnalyzeAllHeuristics}
-                    disabled={isLoading}
+                    disabled={isLoading || isBlockingRecalc}
                     variant="destructive"
                     className="w-full"
                   >
                     <RefreshCw className="h-4 w-4 mr-2" />
-                    {isLoading ? "Processing..." : "Re-Analyze (Clear Inferences)"}
+                    {isLoading || isBlockingRecalc ? "Processing..." : "Re-Analyze (Clear Inferences)"}
                   </Button>
                   <div className="border-t my-2"></div>
                   <Button
@@ -1993,6 +2177,177 @@ export default function Home() {
                   </div>
                 </CardContent>
               </Card>
+
+                {showSidePane && (
+                  <>
+                    {/* Visual separator */}
+                    <div className="w-1 bg-gradient-to-b from-blue-200 via-indigo-300 to-blue-200 rounded-full"></div>
+
+                    {/* Right side: Definition Panel (50%) */}
+                    {selectedWordIndex !== null && selectedWord ? (
+                  <Card className="flex-1 flex flex-col">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex justify-between items-center text-lg">
+                        <span>
+                          Select definition for &quot;{selectedWord.original}&quot;
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSelectedWordIndex(null)}
+                          className="h-8 w-8 p-0"
+                        >
+                          ✕
+                        </Button>
+                      </CardTitle>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Use ←→ to switch words, ↑↓ to navigate definitions, Enter to select
+                      </p>
+                    </CardHeader>
+                    <CardContent className="overflow-y-auto flex-1 space-y-3 pt-0">
+                    {selectedWord.override ? (
+                      <div className="bg-red-50 p-3 rounded-md border border-red-200">
+                        <span className="font-bold text-red-900">Override:</span>
+                        <span className="ml-2 text-red-800">{selectedWord.override.type}</span>
+                        {selectedWord.override.morphology && (
+                          <span className="ml-2 text-xs bg-white px-2 py-0.5 rounded border text-red-700">
+                            {selectedWord.override.morphology}
+                          </span>
+                        )}
+                        <p className="text-sm mt-2">This word is manually overridden.</p>
+                      </div>
+                    ) : (
+                      selectedWord?.lookupResults
+                        ?.slice()
+                        .sort((a, b) => {
+                          // Put selected entry first
+                          const aIsSelected = selectedWord.selectedEntry === a;
+                          const bIsSelected = selectedWord.selectedEntry === b;
+                          if (aIsSelected && !bIsSelected) return -1;
+                          if (!aIsSelected && bIsSelected) return 1;
+                          
+                          // Then guessed entries
+                          const aIsGuessed = selectedWord.selectedEntry === a && selectedWord.guessed;
+                          const bIsGuessed = selectedWord.selectedEntry === b && selectedWord.guessed;
+                          if (aIsGuessed && !bIsGuessed) return -1;
+                          if (!aIsGuessed && bIsGuessed) return 1;
+                          
+                          return 0;
+                        })
+                        .map((entry, i) => {
+                          const isFocused = i === focusedEntryIndex;
+                          const isSelected = selectedWord.selectedEntry === entry;
+                          
+                          return (
+                            <div
+                              key={i}
+                              className={`border rounded-lg p-3 transition-all ${
+                                isSelected
+                                  ? "ring-2 ring-indigo-500 bg-indigo-50"
+                                  : isFocused
+                                    ? "ring-2 ring-blue-300 bg-blue-50"
+                                    : "hover:bg-gray-50"
+                              }`}
+                            >
+                              <div className="flex justify-between items-start mb-2">
+                                <div>
+                                  <h3 className="font-bold text-base text-gray-900">
+                                    {entry.forms.join(", ")}
+                                  </h3>
+                                  <div className="flex gap-2 mt-1">
+                                    <Badge variant="secondary" className="text-xs">
+                                      {entry.type}
+                                    </Badge>
+                                    {entry.dictionaryCode && (
+                                      <span className="text-xs font-mono text-gray-400">
+                                        {entry.dictionaryCode}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <p className="text-sm text-gray-700 mb-3 whitespace-pre-line">
+                                {entry.definition}
+                              </p>
+
+                              {entry.modifications && entry.modifications.length > 0 && (
+                                <div className="text-xs text-gray-500 mb-2 bg-gray-50 p-2 rounded">
+                                  {entry.modifications.map((m, idx) => (
+                                    <div key={idx}>
+                                      <span className="font-semibold">{m.type}:</span> {m.form} - {m.definition}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              <div className="bg-gray-100 rounded-md p-2">
+                                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                                  Select Morphology:
+                                </p>
+                                <div className="space-y-1.5">
+                                  {sortMorphologies(
+                                    entry.morphologies,
+                                    selectedWord.guessed && selectedWord.selectedEntry === entry
+                                      ? selectedWord.selectedMorphology
+                                      : undefined,
+                                  ).map((morph, mi) => {
+                                    const isMorphSelected =
+                                      selectedWord.selectedMorphology === morph.analysis &&
+                                      selectedWord.selectedEntry === entry;
+
+                                    const caseTag = getCaseFromMorphology(morph.analysis);
+                                    const caseColor = caseTag && TAG_CONFIG[caseTag];
+
+                                    return (
+                                      <button
+                                        key={mi}
+                                        onClick={() => selectDefinition(entry, morph.analysis)}
+                                        className={`w-full text-left px-2 py-1.5 rounded transition-all text-xs flex justify-between items-center ${
+                                          isMorphSelected
+                                            ? `${caseColor?.bgClass || "bg-indigo-600"} ${caseColor?.textClass || "text-white"} font-semibold`
+                                            : `bg-white hover:bg-gray-50 border ${caseColor?.borderClass || "border-gray-200"} hover:border-indigo-300 text-gray-800`
+                                        }`}
+                                      >
+                                        <span className="font-medium">{morph.analysis}</span>
+                                        <span className={`font-mono text-xs ${isMorphSelected ? caseColor?.textClass : "text-gray-400"}`}>
+                                          {morph.stem}
+                                        </span>
+                                      </button>
+                                    );
+                                  })}
+                                  {entry.morphologies.length === 0 && (
+                                    <button
+                                      className="w-full text-left px-2 py-1.5 rounded bg-white hover:bg-gray-50 border border-gray-200 hover:border-indigo-300 transition-all text-xs font-medium text-gray-800"
+                                      onClick={() => selectDefinition(entry)}
+                                    >
+                                      Generic / Immutable
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                    )}
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card className="flex-1 flex flex-col">
+                  <CardHeader>
+                    <CardTitle>Definitions</CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex items-center justify-center flex-1 text-center">
+                    <div className="text-gray-400">
+                      <p className="text-lg font-medium mb-2">Click a word to see definitions</p>
+                      <p className="text-sm">Select words from the sentence to view their definitions and morphology</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+                  </>
+                )}
+            </div>
             )}
           </TabsContent>
 
@@ -2092,305 +2447,6 @@ export default function Home() {
           </TabsContent>
         </Tabs>
 
-        {/* Word Selection Dialog */}
-        <Dialog
-          open={selectedWordIndex !== null}
-          onOpenChange={(open) => !open && setSelectedWordIndex(null)}
-        >
-          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex justify-between items-center pr-8">
-                <span>
-                  Select definition for &quot;{selectedWord?.original}&quot;
-                </span>
-              </DialogTitle>
-            </DialogHeader>
-
-            {/* Override Status */}
-            {selectedWord?.override && (
-              <div className="bg-red-50 p-3 rounded-md border border-red-200 mb-4 flex justify-between items-center">
-                <div>
-                  <span className="font-bold text-red-900">Override:</span>
-                  <span className="ml-2 text-red-800">
-                    {selectedWord.override.type}
-                  </span>
-                  {selectedWord.override.morphology && (
-                    <span className="ml-2 text-xs bg-white px-2 py-0.5 rounded border text-red-700">
-                      {selectedWord.override.morphology}
-                    </span>
-                  )}
-                  <span className="ml-2 text-xs bg-white px-2 py-0.5 rounded border text-red-500">
-                    Manual
-                  </span>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    if (selectedWordIndex !== null) {
-                      const newWords = [...analyzerWords];
-                      delete newWords[selectedWordIndex].override;
-                      setAnalyzerWords(newWords);
-                      setSelectedWordIndex(null);
-                    }
-                  }}
-                >
-                  <X className="w-4 h-4 mr-1" /> Remove Override
-                </Button>
-              </div>
-            )}
-
-            {/* Current Selection Status */}
-            {selectedWord?.selectedEntry && !selectedWord?.override && (
-              <div className="bg-blue-50 p-3 rounded-md border border-blue-100 mb-4 flex justify-between items-center">
-                <div>
-                  <span className="font-bold text-blue-900">Current:</span>
-                  <span className="ml-2 text-blue-800">
-                    {selectedWord.selectedEntry.forms[0]}
-                  </span>
-                  <span className="ml-2 text-xs bg-white px-2 py-0.5 rounded border text-gray-500">
-                    {selectedWord.selectedMorphology || "Generic"}
-                  </span>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    if (selectedWordIndex !== null) {
-                      const oldWord = analyzerWords[selectedWordIndex];
-                      const newWords = [...analyzerWords];
-                      
-                      // Count heuristic annotations before clearing
-                      const heuristicAnnotations = oldWord.annotations.filter(ann => ann.heuristic).length;
-                      const hasHeuristicSelection = oldWord.guessed || oldWord.heuristic;
-                      
-                      if (heuristicAnnotations > 0 || hasHeuristicSelection) {
-                        toast.info("Clearing heuristic inferences", {
-                          description: "Dependent heuristics have been removed.",
-                          duration: 2000,
-                        });
-                      }
-                      
-                      // Undo dependent heuristics before clearing
-                      const updatedWords = undoDependentHeuristics(newWords, selectedWordIndex);
-                      
-                      updatedWords[selectedWordIndex] = {
-                        ...updatedWords[selectedWordIndex],
-                        selectedEntry: undefined,
-                        selectedMorphology: undefined,
-                        annotations: updatedWords[selectedWordIndex].annotations.filter(
-                          ann => !ann.heuristic // Keep only manual annotations
-                        ),
-                        heuristic: undefined,
-                        guessed: false,
-                      };
-                      setAnalyzerWords(updatedWords);
-                      setSelectedWordIndex(null);
-                    }
-                  }}
-                >
-                  <X className="w-4 h-4 mr-1" /> Clear
-                </Button>
-              </div>
-            )}
-
-            {/* Heuristic Information */}
-            {selectedWord?.heuristic && (
-              <div className="bg-orange-50 p-3 rounded-md border border-orange-200 mb-4">
-                <div className="flex items-start gap-2">
-                  <Sparkles className="h-4 w-4 text-orange-600 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <p className="text-xs font-semibold text-orange-900 uppercase tracking-wider mb-1">
-                      Applied Heuristic
-                    </p>
-                    <p className="text-sm text-orange-800">
-                      {selectedWord.heuristic}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Show heuristics involving this word in annotations */}
-            {selectedWord && selectedWordIndex !== null && (() => {
-              const involvedHeuristics: string[] = [];
-              
-              // Check annotations ON this word
-              selectedWord.annotations.forEach(ann => {
-                if (ann.heuristic) {
-                  involvedHeuristics.push(ann.heuristic);
-                }
-              });
-              
-              // Check annotations FROM other words TO this word
-              analyzerWords.forEach((w, idx) => {
-                if (idx === selectedWordIndex) return;
-                w.annotations.forEach(ann => {
-                  if (ann.heuristic && ann.targetIndex === selectedWordIndex) {
-                    involvedHeuristics.push(ann.heuristic);
-                  }
-                });
-              });
-              
-              // Check if this word has et prefix
-              if (selectedWord.etGuessed) {
-                involvedHeuristics.push("Enclitic -que detected, prepended 'et'");
-              }
-              
-              // Check if this word has adjacent connection
-              if (selectedWord.adjacentGuessed) {
-                involvedHeuristics.push("Adjacent words with matching case/gender/number");
-              }
-              
-              return involvedHeuristics.length > 0 ? (
-                <div className="bg-blue-50 p-3 rounded-md border border-blue-200 mb-4">
-                  <div className="flex items-start gap-2">
-                    <Layers className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-xs font-semibold text-blue-900 uppercase tracking-wider mb-1">
-                        Related Heuristics
-                      </p>
-                      <ul className="text-sm text-blue-800 space-y-1">
-                        {involvedHeuristics.map((h, i) => (
-                          <li key={i}>• {h}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-              ) : null;
-            })()}
-
-            <div className="space-y-6 mt-2">
-              {selectedWord?.override ? (
-                <div className="text-center py-8 text-gray-500">
-                  <p className="text-sm">This word is manually overridden.</p>
-                  <p className="text-xs mt-2">
-                    Remove the override above to select from dictionary entries.
-                  </p>
-                </div>
-              ) : (
-                selectedWord?.lookupResults
-                  ?.slice() // Create a copy to avoid mutating original
-                  .sort((a, b) => {
-                    // If this entry is the guessed one, put it first
-                    const aIsGuessed =
-                      selectedWord.selectedEntry === a && selectedWord.guessed;
-                    const bIsGuessed =
-                      selectedWord.selectedEntry === b && selectedWord.guessed;
-
-                    if (aIsGuessed && !bIsGuessed) return -1;
-                    if (!aIsGuessed && bIsGuessed) return 1;
-
-                    // Otherwise maintain original order
-                    return 0;
-                  })
-                  .map((entry, i) => (
-                    <div
-                      key={i}
-                      className={`border rounded-lg p-4 transition-colors ${selectedWord.selectedEntry === entry ? "ring-2 ring-indigo-500 bg-indigo-50/10" : "hover:bg-gray-50"}`}
-                    >
-                      <div className="flex justify-between items-start mb-2">
-                        <div>
-                          <h3 className="font-bold text-lg text-gray-900">
-                            {entry.forms.join(", ")}
-                          </h3>
-                          <div className="flex gap-2 mt-1">
-                            <Badge variant="secondary">{entry.type}</Badge>
-                            {entry.dictionaryCode && (
-                              <span className="text-xs font-mono text-gray-400">
-                                {entry.dictionaryCode}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <p className="text-gray-700 mb-4 whitespace-pre-line">
-                        {entry.definition}
-                      </p>
-
-                      {/* Modifications (Prefix/Tackon) */}
-                      {entry.modifications &&
-                        entry.modifications.length > 0 && (
-                          <div className="text-xs text-gray-500 mb-3 bg-gray-50 p-2 rounded">
-                            {entry.modifications.map((m, idx) => (
-                              <div key={idx}>
-                                <span className="font-semibold">{m.type}:</span>{" "}
-                                {m.form} - {m.definition}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                      <div className="bg-gray-100 rounded-md p-3">
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                          Select Morphology:
-                        </p>
-                        <div className="space-y-2">
-                          {sortMorphologies(
-                            entry.morphologies,
-                            selectedWord.guessed &&
-                              selectedWord.selectedEntry === entry
-                              ? selectedWord.selectedMorphology
-                              : undefined,
-                          ).map((morph, mi) => {
-                            const isSelected =
-                              selectedWord.selectedMorphology ===
-                                morph.analysis &&
-                              selectedWord.selectedEntry === entry;
-
-                            // Get case color for this morphology
-                            const caseTag = getCaseFromMorphology(morph.analysis);
-                            const caseColor = caseTag && TAG_CONFIG[caseTag];
-
-                            return (
-                              <button
-                                key={mi}
-                                className={`w-full text-left px-2 py-1 rounded border transition-all text-sm group flex justify-between items-center
-                                                  ${
-                                                    isSelected
-                                                      ? "bg-indigo-600 text-white border-indigo-700 shadow-sm"
-                                                      : caseColor
-                                                        ? `${caseColor.bgClass} ${caseColor.textClass} ${caseColor.borderClass} border hover:opacity-80`
-                                                        : "bg-white hover:bg-gray-50 border-gray-200 hover:border-indigo-300 text-gray-800"
-                                                  }
-                                              `}
-                                onClick={() =>
-                                  selectDefinition(entry, morph.analysis)
-                                }
-                              >
-                                <span className="font-medium">
-                                  {morph.analysis}
-                                </span>
-                                <span
-                                  className={`font-mono text-xs ${
-                                    isSelected
-                                      ? "text-indigo-100"
-                                      : "text-gray-400"
-                                  }`}
-                                >
-                                  {morph.stem}
-                                </span>
-                              </button>
-                            );
-                          })}
-                          {entry.morphologies.length === 0 && (
-                            <button
-                              className="w-full text-left px-2 py-1 rounded bg-white hover:bg-gray-50 border border-gray-200 hover:border-indigo-300 transition-all text-sm font-medium text-gray-800"
-                              onClick={() => selectDefinition(entry)}
-                            >
-                              Generic / Immutable
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
 
         {/* Guess Confirmation Dialog (for annotations only) */}
         {guessConfirmation &&
