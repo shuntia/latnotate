@@ -25,6 +25,11 @@ import {
 
 const execFileAsync = promisify(execFile);
 
+// Helper function to remove accent marks from Latin text
+function removeAccents(text: string): string {
+  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 const AGE_MAP: Record<string, Age> = {
   X: "Any Age",
   A: "Archaic",
@@ -473,6 +478,8 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     let wordsToLookup: string[] = [];
+    const stream = body.stream === true;
+    
     if (body.words && Array.isArray(body.words)) wordsToLookup = body.words;
     else if (body.word) wordsToLookup = [body.word];
     else
@@ -486,6 +493,62 @@ export async function POST(req: NextRequest) {
     const baseDir = path.join(process.cwd(), "data");
     const binPath = path.join(process.cwd(), "bin", "words");
 
+    // If streaming is requested, use ReadableStream
+    if (stream) {
+      const encoder = new TextEncoder();
+      
+      const readableStream = new ReadableStream({
+        async start(controller) {
+          for (const word of wordsToLookup) {
+            const tempFile = path.join(
+              os.tmpdir(),
+              `latnotate-${Date.now()}-${Math.random().toString(36).substring(7)}.txt`,
+            );
+            // Remove accent marks before lookup
+            const cleanedWord = removeAccents(word);
+            fs.writeFileSync(tempFile, cleanedWord);
+
+            try {
+              const { stdout } = await execFileAsync(binPath, [tempFile], {
+                cwd: baseDir,
+                timeout: 5000,
+              });
+
+              const parsed = parseWhitakersOutput(stdout);
+
+              // Sort entries for this word
+              parsed.entries.sort((a, b) => {
+                return calculateScore(b, word) - calculateScore(a, word);
+              });
+
+              // Send each result as a separate JSON chunk
+              const chunk = JSON.stringify({ word, entries: parsed.entries }) + '\n';
+              controller.enqueue(encoder.encode(chunk));
+            } catch (error) {
+              console.error(`Error looking up ${word}:`, error);
+              const chunk = JSON.stringify({ word, entries: [] }) + '\n';
+              controller.enqueue(encoder.encode(chunk));
+            } finally {
+              try {
+                fs.unlinkSync(tempFile);
+              } catch {
+                /* ignore */
+              }
+            }
+          }
+          controller.close();
+        },
+      });
+
+      return new Response(readableStream, {
+        headers: {
+          'Content-Type': 'application/x-ndjson',
+          'Transfer-Encoding': 'chunked',
+        },
+      });
+    }
+
+    // Non-streaming path (original behavior)
     const results: { word: string; entries: WordEntry[] }[] = [];
 
     // Process each word individually to allow proper sorting
@@ -495,7 +558,9 @@ export async function POST(req: NextRequest) {
         os.tmpdir(),
         `latnotate-${Date.now()}-${Math.random().toString(36).substring(7)}.txt`,
       );
-      fs.writeFileSync(tempFile, word);
+      // Remove accent marks before lookup
+      const cleanedWord = removeAccents(word);
+      fs.writeFileSync(tempFile, cleanedWord);
 
       try {
         const { stdout } = await execFileAsync(binPath, [tempFile], {

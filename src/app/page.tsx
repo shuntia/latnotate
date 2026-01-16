@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { X, ArrowRight } from "lucide-react";
+import { Oval, InfinitySpin, Triangle } from "react-loader-spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -21,973 +22,69 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { WordEntry, LookupResult, Morphology } from "@/lib/types";
-
-// --- Types & Constants ---
-
-// Helper to clean punctuation
-const cleanWord = (w: string) => w.replace(/[.,;?!:()"]/g, "").toLowerCase();
-
-type TagType =
-  | "NOM"
-  | "ACC"
-  | "DAT"
-  | "ABL"
-  | "LOC"
-  | "VOC"
-  | "GEN"
-  | "INF"
-  | "ADV"
-  | "CONJ"
-  | "PREP"
-  | "INTERJ"
-  | "PRON"
-  | "NUM";
-
-const TAG_CONFIG: Record<
+import {
   TagType,
-  { label: string; bgClass: string; textClass: string; borderClass: string }
-> = {
-  // Cases
-  NOM: {
-    label: "No",
-    bgClass: "bg-red-200",
-    textClass: "text-red-900",
-    borderClass: "border-red-300",
-  },
-  ACC: {
-    label: "Ac",
-    bgClass: "bg-blue-200",
-    textClass: "text-blue-900",
-    borderClass: "border-blue-300",
-  },
-  DAT: {
-    label: "Da",
-    bgClass: "bg-green-200",
-    textClass: "text-green-900",
-    borderClass: "border-green-300",
-  },
-  ABL: {
-    label: "Ab",
-    bgClass: "bg-orange-200",
-    textClass: "text-orange-900",
-    borderClass: "border-orange-300",
-  },
-  LOC: {
-    label: "Lo",
-    bgClass: "bg-violet-200",
-    textClass: "text-violet-900",
-    borderClass: "border-violet-300",
-  },
-  VOC: {
-    label: "Vo",
-    bgClass: "bg-red-200",
-    textClass: "text-red-900",
-    borderClass: "border-red-300",
-  },
-  GEN: {
-    label: "Ge",
-    bgClass: "bg-indigo-200",
-    textClass: "text-indigo-900",
-    borderClass: "border-indigo-300",
-  },
-  // Other POS / Forms
-  INF: {
-    label: "Inf",
-    bgClass: "bg-cyan-200",
-    textClass: "text-cyan-900",
-    borderClass: "border-cyan-300",
-  },
-  ADV: {
-    label: "Adv",
-    bgClass: "bg-yellow-200",
-    textClass: "text-yellow-900",
-    borderClass: "border-yellow-300",
-  },
-  CONJ: {
-    label: "Conj",
-    bgClass: "bg-pink-200",
-    textClass: "text-pink-900",
-    borderClass: "border-pink-300",
-  },
-  PREP: {
-    label: "Prep",
-    bgClass: "bg-amber-200",
-    textClass: "text-amber-900",
-    borderClass: "border-amber-300",
-  },
-  INTERJ: {
-    label: "Int",
-    bgClass: "bg-zinc-200",
-    textClass: "text-zinc-900",
-    borderClass: "border-zinc-300",
-  },
-  PRON: {
-    label: "Pron",
-    bgClass: "bg-lime-200",
-    textClass: "text-lime-900",
-    borderClass: "border-lime-300",
-  }, // Fallback if no case
-  NUM: {
-    label: "Num",
-    bgClass: "bg-emerald-200",
-    textClass: "text-emerald-900",
-    borderClass: "border-emerald-300",
-  },
-};
-
-// Map POS to full names for hover
-const POS_FULL_NAMES: Record<string, string> = {
-  N: "Noun",
-  V: "Verb",
-  ADJ: "Adjective",
-  ADV: "Adverb",
-  PREP: "Preposition",
-  CONJ: "Conjunction",
-  INTERJ: "Interjection",
-  PRON: "Pronoun",
-  NUM: "Numeral",
-};
-
-interface Annotation {
-  type: "modify" | "possession" | "preposition-scope";
-  targetIndex?: number; // For modify/possession
-  endIndex?: number; // For preposition scope
-  guessed?: boolean; // Flag for heuristically guessed annotations
-  heuristic?: string; // Explanation of the guess
-}
-
-interface SentenceWord {
-  id: string; // unique ID for stability
-  original: string;
-  clean: string;
-  index: number;
-  lookupResults?: WordEntry[];
-  selectedEntry?: WordEntry;
-  selectedMorphology?: string;
-  annotations: Annotation[];
-  guessed?: boolean; // Flag for heuristically guessed selections
-  heuristic?: string; // Explanation of why this was guessed
-  hasEtPrefix?: boolean; // Flag for -que words with "et" prepended
-  etGuessed?: boolean; // Whether the "et" was automatically added
-  override?: { // Manual override of word type
-    type: string; // e.g., "Noun", "Verb", "Adjective"
-    morphology?: string; // e.g., "Genitive Singular", "Accusative Plural"
-    manual: boolean;
-  };
-}
-
-interface ContextMenuState {
-  x: number;
-  y: number;
-  wordIndex: number;
-}
-
-// --- Helpers ---
-
-const getTagFromWord = (word: SentenceWord): TagType | null => {
-  if (!word.selectedEntry) return null;
-  const morph = word.selectedMorphology || "";
-  const pos = word.selectedEntry.type;
-
-  // 1. Case (Highest Priority for Nouns/Adjectives/Pronouns)
-  if (morph.includes("Nominative")) return "NOM";
-  if (morph.includes("Accusative")) return "ACC";
-  if (morph.includes("Dative")) return "DAT";
-  if (morph.includes("Ablative")) return "ABL";
-  if (morph.includes("Locative")) return "LOC";
-  if (morph.includes("Vocative")) return "VOC";
-  if (morph.includes("Genitive")) return "GEN";
-
-  // 2. Verb Forms
-  if (morph.includes("Infinitive")) return "INF";
-
-  // 3. Part of Speech (Fallback)
-  const p = pos as string;
-  if (p === "Adverb") return "ADV";
-  if (p === "Conjunction") return "CONJ";
-  if (p === "Preposition") return "PREP";
-  if (p === "Interjection") return "INTERJ";
-  if (p === "Pronoun") return "PRON";
-  if (p === "Numeral") return "NUM";
-
-  return null;
-};
-
-// Morphology sorting helpers
-const getCaseOrder = (analysis: string): number => {
-  if (analysis.includes("Nominative")) return 0;
-  if (analysis.includes("Genitive")) return 1;
-  if (analysis.includes("Dative")) return 2;
-  if (analysis.includes("Accusative")) return 3;
-  if (analysis.includes("Ablative")) return 4;
-  if (analysis.includes("Vocative")) return 5;
-  if (analysis.includes("Locative")) return 6;
-  return 999; // No case found
-};
-
-const getNumberOrder = (analysis: string): number => {
-  if (analysis.includes("Singular")) return 0;
-  if (analysis.includes("Plural")) return 1;
-  return 999;
-};
-
-const getVoiceOrder = (analysis: string): number => {
-  if (analysis.includes("Active")) return 0;
-  if (analysis.includes("Passive")) return 1;
-  return 999;
-};
-
-const getMoodOrder = (analysis: string): number => {
-  if (analysis.includes("Indicative")) return 0;
-  if (analysis.includes("Subjunctive")) return 1;
-  if (analysis.includes("Imperative")) return 2;
-  if (analysis.includes("Infinitive")) return 3;
-  return 999;
-};
-
-const getPersonOrder = (analysis: string): number => {
-  if (analysis.includes("1st Person")) return 0;
-  if (analysis.includes("2nd Person")) return 1;
-  if (analysis.includes("3rd Person")) return 2;
-  return 999;
-};
-
-const sortMorphologies = (morphologies: Morphology[], guessedAnalysis?: string) => {
-  return morphologies.slice().sort((a, b) => {
-    // Guessed morphology always comes first
-    if (guessedAnalysis) {
-      if (a.analysis === guessedAnalysis) return -1;
-      if (b.analysis === guessedAnalysis) return 1;
-    }
-
-    // Sort by: Case → Number → Voice → Mood → Person
-    const caseCompare = getCaseOrder(a.analysis) - getCaseOrder(b.analysis);
-    if (caseCompare !== 0) return caseCompare;
-
-    const numberCompare = getNumberOrder(a.analysis) - getNumberOrder(b.analysis);
-    if (numberCompare !== 0) return numberCompare;
-
-    const voiceCompare = getVoiceOrder(a.analysis) - getVoiceOrder(b.analysis);
-    if (voiceCompare !== 0) return voiceCompare;
-
-    const moodCompare = getMoodOrder(a.analysis) - getMoodOrder(b.analysis);
-    if (moodCompare !== 0) return moodCompare;
-
-    const personCompare = getPersonOrder(a.analysis) - getPersonOrder(b.analysis);
-    return personCompare;
-  });
-};
-
-// Helper: Extract person and number from verb morphology
-const getVerbPersonNumber = (
-  morph: string,
-): { person: number; number: "S" | "P" } | null => {
-  if (!morph.includes("Person")) return null;
-
-  let person = 0;
-  if (morph.includes("1st Person")) person = 1;
-  else if (morph.includes("2nd Person")) person = 2;
-  else if (morph.includes("3rd Person")) person = 3;
-
-  let number: "S" | "P" | null = null;
-  if (morph.includes("Singular")) number = "S";
-  else if (morph.includes("Plural")) number = "P";
-
-  if (person > 0 && number) return { person, number };
-  return null;
-};
-
-// Helper: Check if morphology is nominative
-const isNominative = (morph: string): boolean => {
-  return morph.includes("Nominative");
-};
-
-// Helper: Extract grammatical number from morphology
-const getGrammaticalNumber = (morph: string): "S" | "P" | null => {
-  if (morph.includes("Singular")) return "S";
-  if (morph.includes("Plural")) return "P";
-  return null;
-};
-
-// Helper: Get case, gender, number from morphology
-const getCaseGenderNumber = (
-  morph: string,
-): { case: string; gender: string; number: string } | null => {
-  const caseMatch =
-    morph.match(/Nominative|Accusative|Genitive|Dative|Ablative|Vocative|Locative/);
-  const genderMatch = morph.match(/Masculine|Feminine|Neuter|Common/);
-  const numberMatch = morph.match(/Singular|Plural/);
-
-  if (!caseMatch || !numberMatch) return null;
-
-  return {
-    case: caseMatch[0],
-    gender: genderMatch ? genderMatch[0] : "",
-    number: numberMatch[0],
-  };
-};
-
-// Apply nominative chunk guessing - complex rules for nominative phrases
-const applyNominativeChunkGuessing = (words: SentenceWord[]): void => {
-  // Find first verb to limit scope
-  const firstVerbIdx = words.findIndex(
-    (w) => w.selectedEntry?.type === "Verb" && w.selectedMorphology,
-  );
-  if (firstVerbIdx === -1) return;
-
-  const verb = words[firstVerbIdx];
-  const verbInfo = getVerbPersonNumber(verb.selectedMorphology!);
-  if (!verbInfo || verbInfo.person !== 3) return;
-
-  // Find contiguous chunk of potential nominatives before verb
-  const chunk: { word: SentenceWord; idx: number; entry: WordEntry; morph: string }[] = [];
-
-  for (let i = 0; i < firstVerbIdx; i++) {
-    const word = words[i];
-    if (word.selectedEntry) continue;
-
-    const entries = word.lookupResults || [];
-    for (const entry of entries) {
-      const nomMorphs = entry.morphologies.filter((m) => {
-        const isNom = isNominative(m.analysis);
-        const num = getGrammaticalNumber(m.analysis);
-        return isNom && num === verbInfo.number;
-      });
-
-      if (nomMorphs.length > 0) {
-        chunk.push({ word, idx: i, entry, morph: nomMorphs[0].analysis });
-        break;
-      }
-    }
-  }
-
-  if (chunk.length === 0) return;
-
-  // Check if chunk is contiguous (all adjacent)
-  const isContiguous = chunk.every((item, idx) => {
-    if (idx === 0) return true;
-    return item.idx === chunk[idx - 1].idx + 1;
-  });
-
-  if (!isContiguous) {
-    // Only guess the first nominative if not contiguous
-    const first = chunk[0];
-    if (first.entry.type === "Noun") {
-      first.word.selectedEntry = first.entry;
-      first.word.selectedMorphology = first.morph;
-      first.word.guessed = true;
-      first.word.heuristic = `Subject of "${verb.original}" (${verbInfo.number === "S" ? "singular" : "plural"})`;
-    }
-    return;
-  }
-
-  // Contiguous nominatives - analyze composition
-  const nouns = chunk.filter((c) => c.entry.type === "Noun");
-  const adjectives = chunk.filter((c) => c.entry.type === "Adjective");
-
-  if (nouns.length === 1 && chunk.length === nouns.length + adjectives.length) {
-    // One noun + all adjectives = guess whole chunk
-    chunk.forEach((item) => {
-      item.word.selectedEntry = item.entry;
-      item.word.selectedMorphology = item.morph;
-      item.word.guessed = true;
-      item.word.heuristic = `Part of subject phrase with "${nouns[0].word.original}"`;
-    });
-  } else if (nouns.length === 2) {
-    // Two nouns - guess everything before first noun as adjectives
-    const firstNounIdx = chunk.findIndex((c) => c.entry.type === "Noun");
-    for (let i = 0; i < firstNounIdx; i++) {
-      const item = chunk[i];
-      if (item.entry.type === "Adjective") {
-        item.word.selectedEntry = item.entry;
-        item.word.selectedMorphology = item.morph;
-        item.word.guessed = true;
-        item.word.heuristic = `Adjective modifying "${chunk[firstNounIdx].word.original}"`;
-      }
-    }
-    // Also guess the first noun
-    const firstNoun = chunk[firstNounIdx];
-    firstNoun.word.selectedEntry = firstNoun.entry;
-    firstNoun.word.selectedMorphology = firstNoun.morph;
-    firstNoun.word.guessed = true;
-    firstNoun.word.heuristic = `Subject of "${verb.original}"`;
-  } else if (nouns.length === 1) {
-    // Just guess the noun
-    const noun = nouns[0];
-    noun.word.selectedEntry = noun.entry;
-    noun.word.selectedMorphology = noun.morph;
-    noun.word.guessed = true;
-    noun.word.heuristic = `Subject of "${verb.original}"`;
-  }
-};
-
-// Heuristically connect adjectives to adjacent nouns
-const applyAdjectiveNounGuessing = (words: SentenceWord[]): void => {
-  for (let i = 0; i < words.length - 1; i++) {
-    const word1 = words[i];
-    const word2 = words[i + 1];
-
-    if (!word1.selectedEntry || !word1.selectedMorphology) continue;
-    if (!word2.selectedEntry || !word2.selectedMorphology) continue;
-
-    // Check if one is adjective and other is noun
-    const word1IsAdj = word1.selectedEntry.type === "Adjective" || word1.selectedEntry.type === "Participle";
-    const word2IsAdj = word2.selectedEntry.type === "Adjective" || word2.selectedEntry.type === "Participle";
-    const word1IsNoun = word1.selectedEntry.type === "Noun";
-    const word2IsNoun = word2.selectedEntry.type === "Noun";
-
-    // Skip if both are adjectives or both are nouns
-    if ((word1IsAdj && word2IsAdj) || (word1IsNoun && word2IsNoun)) continue;
-    if (!((word1IsAdj && word2IsNoun) || (word1IsNoun && word2IsAdj))) continue;
-
-    const cgn1 = getCaseGenderNumber(word1.selectedMorphology);
-    const cgn2 = getCaseGenderNumber(word2.selectedMorphology);
-
-    if (!cgn1 || !cgn2) continue;
-
-    // Check if case, gender, and number match
-    if (
-      cgn1.case === cgn2.case &&
-      cgn1.number === cgn2.number &&
-      (cgn1.gender === cgn2.gender || !cgn1.gender || !cgn2.gender)
-    ) {
-      // Connect adjective to noun
-      const fromIdx = word1IsAdj ? i : i + 1;
-      const toIdx = word1IsAdj ? i + 1 : i;
-      
-      const existingConn = words[fromIdx].annotations.find(
-        (a) => a.type === "modify" && a.targetIndex === toIdx,
-      );
-
-      if (!existingConn) {
-        words[fromIdx].annotations.push({
-          type: "modify",
-          targetIndex: toIdx,
-          guessed: true,
-          heuristic: `Adjective modifying noun: ${cgn1.case} ${cgn1.number}${cgn1.gender ? " " + cgn1.gender : ""}`,
-        });
-      }
-    }
-  }
-};
-
-// Heuristically create prepositional brackets
-const applyPrepositionalBracketGuessing = (words: SentenceWord[]): void => {
-  words.forEach((word, idx) => {
-    if (!word.selectedEntry) return;
-    const isPrep = word.selectedEntry.type === "Other" && 
-                   word.selectedMorphology?.includes("Preposition");
-    
-    if (!isPrep) return;
-
-    const prepForm = word.clean.toLowerCase();
-    const requiredCases = PREP_CASE_MAP[prepForm];
-    if (!requiredCases) return;
-
-    // Look for the object (next matching case noun/adjective)
-    for (let i = idx + 1; i < Math.min(idx + 5, words.length); i++) {
-      const candidate = words[i];
-      if (!candidate.selectedEntry || !candidate.selectedMorphology) continue;
-
-      const cgn = getCaseGenderNumber(candidate.selectedMorphology);
-      if (!cgn) continue;
-
-      // Check if this word matches the required case
-      if (requiredCases.includes(cgn.case)) {
-        // Find the end of the prepositional phrase (last matching adjective/noun in sequence)
-        let endIdx = i;
-        for (let j = i + 1; j < words.length; j++) {
-          const next = words[j];
-          if (!next.selectedEntry || !next.selectedMorphology) break;
-          
-          const nextCgn = getCaseGenderNumber(next.selectedMorphology);
-          if (!nextCgn) break;
-          
-          // Continue if matches case (adjectives modifying the noun)
-          if (nextCgn.case === cgn.case && nextCgn.number === cgn.number &&
-              (next.selectedEntry.type === "Adjective" || next.selectedEntry.type === "Participle" || next.selectedEntry.type === "Noun")) {
-            endIdx = j;
-          } else {
-            break;
-          }
-        }
-
-        // Create bracket annotation if it doesn't exist
-        const existingBracket = word.annotations.find(
-          (a) => a.type === "preposition-scope"
-        );
-
-        if (!existingBracket) {
-          word.annotations.push({
-            type: "preposition-scope",
-            endIndex: endIdx,
-            guessed: true,
-            heuristic: `Prepositional phrase: ${word.original} + ${cgn.case} object`,
-          });
-        }
-        return;
-      }
-    }
-  });
-};
-
-// Heuristically create prepositional brackets by looking backward from guessed case
-const applyReversePrepositionalBracketGuessing = (words: SentenceWord[]): void => {
-  words.forEach((word, idx) => {
-    // Only apply if this word was heuristically guessed (not manually selected)
-    if (!word.selectedEntry || !word.selectedMorphology || !word.guessed) return;
-
-    const cgn = getCaseGenderNumber(word.selectedMorphology);
-    if (!cgn) return;
-
-    // Only care about accusative or ablative (common prepositional cases)
-    if (cgn.case !== "Accusative" && cgn.case !== "Ablative") return;
-
-    // Look backward through adjacent adjectives/nouns to find a preposition
-    let prepIdx = -1;
-
-    // Walk backward through matching case adjectives/nouns
-    for (let i = idx - 1; i >= 0; i--) {
-      const candidate = words[i];
-      if (!candidate.selectedEntry || !candidate.selectedMorphology) break;
-
-      const candidateCgn = getCaseGenderNumber(candidate.selectedMorphology);
-      
-      // Check if it's a preposition
-      const isPrep = candidate.selectedEntry.type === "Other" && 
-                     candidate.selectedMorphology.includes("Preposition");
-      
-      if (isPrep) {
-        // Found a preposition! Check if it matches the case
-        const prepForm = candidate.clean.toLowerCase();
-        const requiredCases = PREP_CASE_MAP[prepForm];
-        
-        if (requiredCases && requiredCases.includes(cgn.case)) {
-          prepIdx = i;
-          break;
-        }
-      } else if (candidateCgn && candidateCgn.case === cgn.case && candidateCgn.number === cgn.number &&
-                 (candidate.selectedEntry.type === "Adjective" || 
-                  candidate.selectedEntry.type === "Participle" || 
-                  candidate.selectedEntry.type === "Noun")) {
-        // Continue backward through matching adjectives/nouns
-        continue;
-      } else {
-        // Different case or non-matching type, stop
-        break;
-      }
-    }
-
-    // If we found a preposition, create the bracket
-    if (prepIdx >= 0) {
-      const prep = words[prepIdx];
-      
-      // Find the end of the phrase (last matching word)
-      let endIdx = idx;
-      for (let j = idx + 1; j < words.length; j++) {
-        const next = words[j];
-        if (!next.selectedEntry || !next.selectedMorphology) break;
-        
-        const nextCgn = getCaseGenderNumber(next.selectedMorphology);
-        if (!nextCgn) break;
-        
-        // Continue if matches case
-        if (nextCgn.case === cgn.case && nextCgn.number === cgn.number &&
-            (next.selectedEntry.type === "Adjective" || 
-             next.selectedEntry.type === "Participle" || 
-             next.selectedEntry.type === "Noun")) {
-          endIdx = j;
-        } else {
-          break;
-        }
-      }
-
-      // Create bracket if it doesn't exist
-      const existingBracket = prep.annotations.find(
-        (a) => a.type === "preposition-scope"
-      );
-
-      if (!existingBracket) {
-        prep.annotations.push({
-          type: "preposition-scope",
-          endIndex: endIdx,
-          guessed: true,
-          heuristic: `Prepositional phrase: ${prep.original} + ${cgn.case} object (detected from object)`,
-        });
-      }
-    }
-  });
-};
-
-// Apply case/gender/number agreement for adjacent words
-const applyAdjacentAgreementGuessing = (words: SentenceWord[]): void => {
-  for (let i = 0; i < words.length - 1; i++) {
-    const word1 = words[i];
-    const word2 = words[i + 1];
-
-    if (!word1.selectedEntry || !word1.selectedMorphology) continue;
-    if (!word2.selectedEntry || !word2.selectedMorphology) continue;
-
-    const cgn1 = getCaseGenderNumber(word1.selectedMorphology);
-    const cgn2 = getCaseGenderNumber(word2.selectedMorphology);
-
-    if (!cgn1 || !cgn2) continue;
-
-    // Check if case, gender, and number match
-    if (
-      cgn1.case === cgn2.case &&
-      cgn1.number === cgn2.number &&
-      (cgn1.gender === cgn2.gender || !cgn1.gender || !cgn2.gender)
-    ) {
-      // Create connection annotation
-      const existingConn = word1.annotations.find(
-        (a) => a.type === "modify" && a.targetIndex === i + 1,
-      );
-
-      if (!existingConn) {
-        word1.annotations.push({
-          type: "modify",
-          targetIndex: i + 1,
-          guessed: true,
-          heuristic: `Agreement: ${cgn1.case} ${cgn1.number}${cgn1.gender ? " " + cgn1.gender : ""}`,
-        });
-      }
-    }
-  }
-};
-
-// Heuristically connect genitive words to nearest previous noun
-const applyGenitiveHeuristic = (words: SentenceWord[]): void => {
-  words.forEach((word, idx) => {
-    if (!word.selectedEntry || !word.selectedMorphology) return;
-    
-    const cgn = getCaseGenderNumber(word.selectedMorphology);
-    if (!cgn || cgn.case !== "Genitive") return;
-    
-    // Look backward for the first word that must be a noun
-    // (has at least one noun entry in its results)
-    for (let i = idx - 1; i >= 0; i--) {
-      const candidate = words[i];
-      
-      // Check if this word has any noun entries at all
-      const hasNounEntry = candidate.lookupResults?.some(
-        entry => entry.type === "Noun"
-      );
-      
-      if (!hasNounEntry) continue;
-      
-      // This word can be a noun - connect to it
-      const existingConn = word.annotations.find(
-        (a) => a.type === "possession" && a.targetIndex === i
-      );
-      
-      if (!existingConn) {
-        word.annotations.push({
-          type: "possession",
-          targetIndex: i,
-          guessed: true,
-          heuristic: `Genitive modifying nearest possible noun "${candidate.original}"`,
-        });
-      }
-      return; // Found nearest noun, stop
-    }
-  });
-};
-
-// Map common prepositions to their required cases
-const PREP_CASE_MAP: Record<string, string[]> = {
-  // Accusative prepositions
-  ad: ["Accusative"],
-  ante: ["Accusative"],
-  apud: ["Accusative"],
-  circa: ["Accusative"],
-  circum: ["Accusative"],
-  contra: ["Accusative"],
-  erga: ["Accusative"],
-  extra: ["Accusative"],
-  infra: ["Accusative"],
-  inter: ["Accusative"],
-  intra: ["Accusative"],
-  iuxta: ["Accusative"],
-  ob: ["Accusative"],
-  per: ["Accusative"],
-  post: ["Accusative"],
-  prope: ["Accusative"],
-  propter: ["Accusative"],
-  secundum: ["Accusative"],
-  trans: ["Accusative"],
-  ultra: ["Accusative"],
-  versus: ["Accusative"],
-  
-  // Ablative prepositions
-  a: ["Ablative"],
-  ab: ["Ablative"],
-  abs: ["Ablative"],
-  absque: ["Ablative"],
-  cum: ["Ablative"],
-  de: ["Ablative"],
-  e: ["Ablative"],
-  ex: ["Ablative"],
-  prae: ["Ablative"],
-  pro: ["Ablative"],
-  sine: ["Ablative"],
-  
-  // Mixed (context-dependent)
-  in: ["Accusative", "Ablative"],
-  sub: ["Accusative", "Ablative"],
-  super: ["Accusative", "Ablative"],
-  subter: ["Accusative", "Ablative"],
-};
-
-// Apply prepositional case guessing (both directions)
-const applyPrepositionalGuessing = (words: SentenceWord[]): void => {
-  // Forward pass: preposition already selected, guess object
-  words.forEach((word, idx) => {
-    if (!word.selectedEntry) return;
-    const isPrep = word.selectedEntry.type === "Other" && 
-                   word.selectedMorphology?.includes("Preposition");
-    
-    if (!isPrep) return;
-
-    const prepForm = word.clean.toLowerCase();
-    const requiredCases = PREP_CASE_MAP[prepForm];
-    if (!requiredCases) return;
-
-    // Look at next word(s) after the preposition
-    for (let i = idx + 1; i < Math.min(idx + 4, words.length); i++) {
-      const candidate = words[i];
-      if (candidate.selectedEntry) continue;
-
-      const entries = candidate.lookupResults || [];
-      if (entries.length === 0) continue;
-
-      for (const entry of entries) {
-        const matchingMorphs = entry.morphologies.filter((m) =>
-          requiredCases.some((reqCase) => m.analysis.includes(reqCase))
-        );
-
-        if (matchingMorphs.length === 1) {
-          candidate.selectedEntry = entry;
-          candidate.selectedMorphology = matchingMorphs[0].analysis;
-          candidate.guessed = true;
-          candidate.heuristic = `Object of "${word.original}" (requires ${requiredCases.join(" or ")})`;
-          return;
-        } else if (matchingMorphs.length > 1 && requiredCases.length === 1) {
-          candidate.selectedEntry = entry;
-          candidate.selectedMorphology = matchingMorphs[0].analysis;
-          candidate.guessed = true;
-          candidate.heuristic = `Object of "${word.original}" (requires ${requiredCases[0]})`;
-          return;
-        }
-      }
-    }
-  });
-
-  // Reverse pass: noun already selected, guess preposition before it
-  words.forEach((word, idx) => {
-    if (!word.selectedEntry || !word.selectedMorphology) return;
-    if (idx === 0) return;
-
-    const cgn = getCaseGenderNumber(word.selectedMorphology);
-    if (!cgn || (cgn.case !== "Accusative" && cgn.case !== "Ablative")) return;
-
-    // Look back for potential preposition
-    const prevWord = words[idx - 1];
-    if (prevWord.selectedEntry) return;
-
-    const entries = prevWord.lookupResults || [];
-    for (const entry of entries) {
-      if (entry.type !== "Other") continue;
-      
-      const prepMorphs = entry.morphologies.filter((m) =>
-        m.analysis.includes("Preposition")
-      );
-
-      if (prepMorphs.length === 0) continue;
-
-      // Check if this preposition can take the case we have
-      const prepForm = prevWord.clean.toLowerCase();
-      const validCases = PREP_CASE_MAP[prepForm];
-      
-      if (validCases && validCases.includes(cgn.case)) {
-        prevWord.selectedEntry = entry;
-        prevWord.selectedMorphology = prepMorphs[0].analysis;
-        prevWord.guessed = true;
-        prevWord.heuristic = `Preposition before ${cgn.case} "${word.original}"`;
-        return;
-      }
-    }
-  });
-};
-
-// Heuristically add "et" before -que words
-const applyQueEtGuessing = (words: SentenceWord[]): void => {
-  words.forEach((word) => {
-    if (!word.selectedEntry) return;
-    
-    // Check if word has -que tackon
-    const hasTackon = word.selectedEntry.modifications?.some(
-      (m) => m.type === "Tackon" && m.form.toLowerCase() === "que"
-    );
-    
-    if (hasTackon && !word.hasEtPrefix) {
-      word.hasEtPrefix = true;
-      word.etGuessed = true;
-    }
-  });
-};
-
-// Incremental heuristics - apply only to specific word context
-const applyIncrementalHeuristics = (words: SentenceWord[], changedIndex: number): void => {
-  const changedWord = words[changedIndex];
-  if (!changedWord.selectedEntry || !changedWord.selectedMorphology) return;
-
-  // 1. If this word is a preposition, try to guess its object
-  const isPrep = changedWord.selectedEntry.type === "Other" && 
-                 changedWord.selectedMorphology.includes("Preposition");
-  
-  if (isPrep) {
-    const prepForm = changedWord.clean.toLowerCase();
-    const requiredCases = PREP_CASE_MAP[prepForm];
-    
-    if (requiredCases) {
-      // Look ahead for object
-      for (let i = changedIndex + 1; i < Math.min(changedIndex + 4, words.length); i++) {
-        const candidate = words[i];
-        if (candidate.selectedEntry) continue;
-
-        const entries = candidate.lookupResults || [];
-        for (const entry of entries) {
-          const matchingMorphs = entry.morphologies.filter((m) =>
-            requiredCases.some((reqCase) => m.analysis.includes(reqCase))
-          );
-
-          if (matchingMorphs.length === 1) {
-            candidate.selectedEntry = entry;
-            candidate.selectedMorphology = matchingMorphs[0].analysis;
-            candidate.guessed = true;
-            candidate.heuristic = `Object of "${changedWord.original}" (requires ${requiredCases.join(" or ")})`;
-            return;
-          } else if (matchingMorphs.length > 1 && requiredCases.length === 1) {
-            candidate.selectedEntry = entry;
-            candidate.selectedMorphology = matchingMorphs[0].analysis;
-            candidate.guessed = true;
-            candidate.heuristic = `Object of "${changedWord.original}" (requires ${requiredCases[0]})`;
-            return;
-          }
-        }
-      }
-    }
-  }
-
-  // 2. If this word has a case, try to guess preposition before it
-  const cgn = getCaseGenderNumber(changedWord.selectedMorphology);
-  if (cgn && (cgn.case === "Accusative" || cgn.case === "Ablative") && changedIndex > 0) {
-    const prevWord = words[changedIndex - 1];
-    if (!prevWord.selectedEntry) {
-      const entries = prevWord.lookupResults || [];
-      
-      for (const entry of entries) {
-        if (entry.type !== "Other") continue;
-        
-        const prepMorphs = entry.morphologies.filter((m) =>
-          m.analysis.includes("Preposition")
-        );
-
-        if (prepMorphs.length === 0) continue;
-
-        const prepForm = prevWord.clean.toLowerCase();
-        const validCases = PREP_CASE_MAP[prepForm];
-        
-        if (validCases && validCases.includes(cgn.case)) {
-          prevWord.selectedEntry = entry;
-          prevWord.selectedMorphology = prepMorphs[0].analysis;
-          prevWord.guessed = true;
-          prevWord.heuristic = `Preposition before ${cgn.case} "${changedWord.original}"`;
-          break;
-        }
-      }
-    }
-  }
-
-  // 3. If this word is a 3rd person verb, try to find nominative subject
-  if (changedWord.selectedEntry.type === "Verb") {
-    const verbInfo = getVerbPersonNumber(changedWord.selectedMorphology);
-    if (verbInfo && verbInfo.person === 3) {
-      // Look backwards for matching nominative
-      for (let i = changedIndex - 1; i >= 0; i--) {
-        const candidate = words[i];
-        if (candidate.selectedEntry) continue;
-
-        const entries = candidate.lookupResults || [];
-        for (const entry of entries) {
-          if (entry.type !== "Noun") continue;
-
-          const nomMorphs = entry.morphologies.filter((m) => {
-            const isNom = isNominative(m.analysis);
-            const num = getGrammaticalNumber(m.analysis);
-            return isNom && num === verbInfo.number;
-          });
-
-          if (nomMorphs.length === 1) {
-            candidate.selectedEntry = entry;
-            candidate.selectedMorphology = nomMorphs[0].analysis;
-            candidate.guessed = true;
-            candidate.heuristic = `Subject of "${changedWord.original}" (${verbInfo.number === "S" ? "singular" : "plural"})`;
-            return;
-          } else if (nomMorphs.length > 1) {
-            candidate.selectedEntry = entry;
-            candidate.selectedMorphology = nomMorphs[0].analysis;
-            candidate.guessed = true;
-            candidate.heuristic = `Subject of "${changedWord.original}" (${verbInfo.number === "S" ? "singular" : "plural"})`;
-            return;
-          }
-        }
-      }
-    }
-  }
-
-  // 4. Check adjacent words for agreement
-  const checkAdjacentAgreement = (idx1: number, idx2: number) => {
-    if (idx2 < 0 || idx2 >= words.length) return;
-    
-    const word1 = words[idx1];
-    const word2 = words[idx2];
-
-    if (!word1.selectedEntry || !word1.selectedMorphology) return;
-    if (!word2.selectedEntry || !word2.selectedMorphology) return;
-
-    const cgn1 = getCaseGenderNumber(word1.selectedMorphology);
-    const cgn2 = getCaseGenderNumber(word2.selectedMorphology);
-
-    if (!cgn1 || !cgn2) return;
-
-    if (
-      cgn1.case === cgn2.case &&
-      cgn1.number === cgn2.number &&
-      (cgn1.gender === cgn2.gender || !cgn1.gender || !cgn2.gender)
-    ) {
-      const existingConn = word1.annotations.find(
-        (a) => a.type === "modify" && a.targetIndex === idx2
-      );
-
-      if (!existingConn) {
-        word1.annotations.push({
-          type: "modify",
-          targetIndex: idx2,
-          guessed: true,
-          heuristic: `Agreement: ${cgn1.case} ${cgn1.number}${cgn1.gender ? " " + cgn1.gender : ""}`,
-        });
-      }
-    }
-  };
-
-  // Check both neighbors
-  checkAdjacentAgreement(changedIndex, changedIndex + 1);
-  if (changedIndex > 0) {
-    checkAdjacentAgreement(changedIndex - 1, changedIndex);
-  }
-};
+  Annotation,
+  SentenceWord,
+  ContextMenuState,
+  GuessConfirmation,
+} from "@/lib/types/sentence";
+import { TAG_CONFIG, POS_FULL_NAMES } from "@/lib/constants/tags";
+import {
+  getTagFromWord,
+  getCaseOrder,
+  getNumberOrder,
+  getVoiceOrder,
+  getMoodOrder,
+  getPersonOrder,
+  sortMorphologies,
+  formatMorphologyDisplay,
+  getVerbPersonNumber,
+  isNominative,
+  getGrammaticalNumber,
+  getCaseGenderNumber,
+} from "@/lib/utils/morphology";
+import {
+  cleanWord,
+  getGuaranteedCase,
+  getGuaranteedPOS,
+  isGuaranteedPreposition,
+  isPotentialPreposition,
+  isConjunction,
+  getPrepositionCases,
+  getSelectedPrepositionCases,
+} from "@/lib/utils/word-helpers";
+import {
+  applyNominativeChunkGuessing,
+  applyAdjectiveNounGuessing,
+  applyAdjectiveCaseGuessing,
+  applyPrepositionalBracketGuessing,
+  applyPrepositionalGuessing,
+  applyPrepositionIdentification,
+  applyGenitiveHeuristic,
+  applyAdjacentAgreementGuessing,
+  applyQueEtGuessing,
+  applyIncrementalHeuristics,
+  rerunDependentHeuristics,
+  applyRelativePronounHeuristic,
+  applyDativeIndirectObjectHeuristic,
+  applyAppositionHeuristic,
+  applyAccusativeInfinitiveHeuristic,
+  applyTemporalClauseHeuristic,
+  applyComparativeHeuristic,
+  applyAblativeMeansHeuristic,
+  applyAblativeAgentHeuristic,
+  applyAblativeAbsoluteHeuristic,
+  applyParticipleModifierHeuristic,
+  applyLinkingVerbHeuristic,
+  applyComplementaryInfinitiveHeuristic,
+  applyVocativeHeuristic,
+  applyPurposeClauseHeuristic,
+  applySumHeuristic,
+  applyPrepositionInference,
+  applyAdjectiveAgreementInference,
+  applyParticipleBraceHeuristic,
+} from "@/lib/heuristics";
 
 // --- Components ---
 
@@ -1007,14 +104,14 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState("analyzer");
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [interactionMode, setInteractionMode] = useState<{
-    type: "select-target" | "select-range";
+    type: "select-target" | "select-range" | "select-heuristic-range";
     sourceIndex: number;
     annotationType: Annotation["type"];
   } | null>(null);
   const [guessConfirmation, setGuessConfirmation] = useState<{
     wordIndex: number;
     annotationIndex?: number;
-    type: "word" | "annotation";
+    type: "word" | "annotation" | "selection";
   } | null>(null);
   const [overrideDialogIndex, setOverrideDialogIndex] = useState<number | null>(null);
   const [overrideType, setOverrideType] = useState<string>("");
@@ -1335,72 +432,221 @@ export default function Home() {
     const uniqueWords = Array.from(new Set(lookupWords));
 
     try {
-      const res = await fetch("/api/lookup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ words: uniqueWords }),
-      });
+      // Use streaming for analyzer mode
+      if (mode === "analyzer") {
+        const res = await fetch("/api/lookup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ words: uniqueWords, stream: true }),
+        });
 
-      const data: LookupResult = await res.json();
-      if (!res.ok)
-        throw new Error(
-          (data as { error?: string }).error || "Failed to lookup words",
-        );
+        if (!res.ok || !res.body) {
+          throw new Error("Failed to lookup words");
+        }
 
-      if (mode === "dictionary") {
-        setDictionaryResult(data);
-      } else {
+        // Initialize words array with empty entries
+        const words: SentenceWord[] = rawTokens.map((token, idx) => ({
+          id: `${idx}-${Date.now()}`,
+          original: token,
+          clean: cleanWord(token),
+          index: idx,
+          lookupResults: [],
+          selectedEntry: undefined,
+          selectedMorphology: undefined,
+          annotations: [],
+        }));
+
+        // Display words immediately (without definitions)
+        setAnalyzerWords([...words]);
+        // Don't set isLoading yet - we'll set it when heuristics start
+
+        // Process stream
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
         const resultMap = new Map<string, WordEntry[]>();
-        data.results.forEach((r) => resultMap.set(r.word, r.entries));
+        let heuristicsStarted = false; // Track when we switch to heuristic phase
+        let lastCompleteSentenceEnd = -1; // Track last sentence we've processed heuristics for
 
-        const words: SentenceWord[] = rawTokens.map((token, idx) => {
-          const clean = cleanWord(token);
-          const entries = resultMap.get(clean) || [];
+        // Helper to check if a word is a sentence separator
+        const isSentenceSeparator = (word: SentenceWord): boolean => {
+          const cleaned = cleanWord(word.original);
+          if (!cleaned || cleaned === '.' || cleaned === ';' || cleaned === ':' || cleaned === '?' || cleaned === '!') {
+            return true;
+          }
+          if (word.original === '"' || word.original === "'" || word.original === '«' || word.original === '»') {
+            return true;
+          }
+          return false;
+        };
 
-          // Auto-select logic
-          let selectedEntry: WordEntry | undefined;
-          let selectedMorphology: string | undefined;
-
-          if (entries.length === 1) {
-            const entry = entries[0];
-            if (entry.morphologies.length === 0) {
-              // Immutable / Generic
-              selectedEntry = entry;
-            } else if (entry.morphologies.length === 1) {
-              // Single morphology
-              selectedEntry = entry;
-              selectedMorphology = entry.morphologies[0].analysis;
+        // Helper to find complete sentences
+        const findCompleteSentences = (): number[] => {
+          const sentenceEnds: number[] = [];
+          for (let i = 0; i < words.length; i++) {
+            if (isSentenceSeparator(words[i]) && words[i].lookupResults) {
+              sentenceEnds.push(i);
             }
           }
+          return sentenceEnds;
+        };
 
-          return {
-            id: `${idx}-${Date.now()}`,
-            original: token,
-            clean,
-            index: idx,
-            lookupResults: entries,
-            selectedEntry,
-            selectedMorphology,
-            annotations: [],
-          };
-        });
+        while (true) {
+          const { done, value } = await reader.read();
+          
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          
+          // Keep last incomplete line in buffer
+          buffer = lines.pop() || "";
+
+          // Process complete lines
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            
+            try {
+              const result = JSON.parse(line);
+              resultMap.set(result.word, result.entries);
+
+              // Update words with new results
+              words.forEach((word, idx) => {
+                if (word.clean === result.word && result.entries.length > 0) {
+                  word.lookupResults = result.entries;
+
+                  // Auto-select logic
+                  if (result.entries.length === 1) {
+                    const entry = result.entries[0];
+                    if (entry.morphologies.length === 0) {
+                      word.selectedEntry = entry;
+                    } else if (entry.morphologies.length === 1) {
+                      word.selectedEntry = entry;
+                      word.selectedMorphology = entry.morphologies[0].analysis;
+                    }
+                  }
+                }
+              });
+
+              // Check for newly completed sentences
+              const sentenceEnds = findCompleteSentences();
+              
+              for (const sentenceEnd of sentenceEnds) {
+                if (sentenceEnd > lastCompleteSentenceEnd) {
+                  // We have a new complete sentence!
+                  // Switch to heuristic mode if not already
+                  if (!heuristicsStarted) {
+                    heuristicsStarted = true;
+                    setLoading(false);
+                    setIsLoading(true);
+                  }
+
+                  // Find sentence start (after previous separator or beginning)
+                  let sentenceStart = lastCompleteSentenceEnd + 1;
+                  
+                  // Extract just this sentence
+                  const sentenceWords = words.slice(sentenceStart, sentenceEnd + 1);
+                  
+                  // Run heuristics on this complete sentence
+                  applyPrepositionIdentification(sentenceWords);
+                  applyQueEtGuessing(sentenceWords);
+                  applyAdjacentAgreementGuessing(sentenceWords);
+                  applyAdjectiveNounGuessing(sentenceWords);
+                  applyAppositionHeuristic(sentenceWords);
+                  applyGenitiveHeuristic(sentenceWords);
+                  applyComparativeHeuristic(sentenceWords);
+                  
+                  // New heuristics (second batch)
+                  applyParticipleModifierHeuristic(sentenceWords);
+                  applyLinkingVerbHeuristic(sentenceWords);
+                  applyComplementaryInfinitiveHeuristic(sentenceWords);
+                  applyVocativeHeuristic(sentenceWords);
+                  applyPurposeClauseHeuristic(sentenceWords);
+                  
+                  // New heuristics (third batch - improvements)
+                  applySumHeuristic(sentenceWords);
+                  applyPrepositionInference(sentenceWords);
+                  applyAdjectiveAgreementInference(sentenceWords);
+                  applyParticipleBraceHeuristic(sentenceWords);
+                  
+                  // Bracket building (must come after selection)
+                  applyPrepositionalBracketGuessing(sentenceWords);
+                  
+                  lastCompleteSentenceEnd = sentenceEnd;
+                }
+              }
+
+              // Update UI
+              setAnalyzerWords([...words]);
+            } catch (e) {
+              console.error("Failed to parse chunk:", line, e);
+            }
+          }
+        }
+
+        // All words loaded - run full heuristics
+        // Ensure we've switched to heuristic phase
+        if (!heuristicsStarted) {
+          setLoading(false);
+          setIsLoading(true);
+        }
         
-        // Apply heuristic guessing in order of confidence
-        setIsLoading(true);
-        // Use setTimeout to allow UI to update with spinner
         setTimeout(() => {
+          // First: Identify guaranteed prepositions (auto-inference)
+          applyPrepositionIdentification(words);
+          
+          // Then: Run dependent heuristics
           applyNominativeChunkGuessing(words);
           applyPrepositionalGuessing(words);
           applyAdjectiveNounGuessing(words);
           applyPrepositionalBracketGuessing(words);
-          applyReversePrepositionalBracketGuessing(words);
           applyQueEtGuessing(words);
           applyGenitiveHeuristic(words);
           applyAdjacentAgreementGuessing(words);
           
-          setAnalyzerWords(words);
+          // New heuristics (first batch)
+          applyRelativePronounHeuristic(words);
+          applyDativeIndirectObjectHeuristic(words);
+          applyAppositionHeuristic(words);
+          applyAccusativeInfinitiveHeuristic(words);
+          applyTemporalClauseHeuristic(words);
+          applyComparativeHeuristic(words);
+          applyAblativeMeansHeuristic(words);
+          applyAblativeAgentHeuristic(words);
+          applyAblativeAbsoluteHeuristic(words);
+          
+          // New heuristics (second batch)
+          applyParticipleModifierHeuristic(words);
+          applyLinkingVerbHeuristic(words);
+          applyComplementaryInfinitiveHeuristic(words);
+          applyVocativeHeuristic(words);
+          applyPurposeClauseHeuristic(words);
+          
+          // New heuristics (third batch - improvements)
+          applySumHeuristic(words);
+          applyPrepositionInference(words);
+          applyAdjectiveAgreementInference(words);
+          applyParticipleBraceHeuristic(words);
+          
+          setAnalyzerWords([...words]);
           setIsLoading(false);
         }, 10);
+        
+      } else {
+        // Dictionary mode - use non-streaming
+        const res = await fetch("/api/lookup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ words: uniqueWords }),
+        });
+
+        const data: LookupResult = await res.json();
+        if (!res.ok)
+          throw new Error(
+            (data as { error?: string }).error || "Failed to lookup words",
+          );
+
+        setDictionaryResult(data);
       }
     } catch (err) {
       setError(
@@ -1418,8 +664,67 @@ export default function Home() {
     setTimeout(() => {
       const newWords = [...analyzerWords];
       
-      // Clear all guessed annotations and selections
+      // DO NOT clear guessed selections/annotations
+      // Treat them as "correct" and use them as constraints
+      // Only clear rejected heuristics so they can be re-attempted
       newWords.forEach(word => {
+        word.rejectedHeuristics?.clear();
+      });
+      
+      // Rerun all heuristics (they will respect existing selections)
+      // First: Identify guaranteed prepositions (auto-inference)
+      applyPrepositionIdentification(newWords);
+      
+      // Then: Run dependent heuristics
+      applyNominativeChunkGuessing(newWords);
+      applyPrepositionalGuessing(newWords);
+      applyAdjectiveNounGuessing(newWords);
+      applyPrepositionalBracketGuessing(newWords);
+      applyQueEtGuessing(newWords);
+      applyGenitiveHeuristic(newWords);
+      applyAdjacentAgreementGuessing(newWords);
+      
+      // New heuristics
+      applyRelativePronounHeuristic(newWords);
+      applyDativeIndirectObjectHeuristic(newWords);
+      applyAppositionHeuristic(newWords);
+      applyAccusativeInfinitiveHeuristic(newWords);
+      applyTemporalClauseHeuristic(newWords);
+      applyComparativeHeuristic(newWords);
+      applyAblativeMeansHeuristic(newWords);
+      applyAblativeAgentHeuristic(newWords);
+      applyAblativeAbsoluteHeuristic(newWords);
+      
+      // New heuristics (second batch)
+      applyParticipleModifierHeuristic(newWords);
+      applyLinkingVerbHeuristic(newWords);
+      applyComplementaryInfinitiveHeuristic(newWords);
+      applyVocativeHeuristic(newWords);
+      applyPurposeClauseHeuristic(newWords);
+      
+      // New heuristics (third batch - improvements)
+      applySumHeuristic(newWords);
+      applyPrepositionInference(newWords);
+      applyAdjectiveAgreementInference(newWords);
+      applyParticipleBraceHeuristic(newWords);
+      
+      setAnalyzerWords(newWords);
+      setIsLoading(false);
+    }, 10);
+  };
+
+  const rerunHeuristicsInRange = (startIndex: number, endIndex: number) => {
+    if (analyzerWords.length === 0) return;
+    
+    setIsLoading(true);
+    setTimeout(() => {
+      const newWords = [...analyzerWords];
+      
+      // Clear only guessed selections/annotations in the range
+      for (let i = startIndex; i <= endIndex; i++) {
+        const word = newWords[i];
+        if (!word) continue;
+        
         // Remove guessed annotations
         word.annotations = word.annotations.filter(ann => !ann.guessed);
         
@@ -1436,17 +741,49 @@ export default function Home() {
           word.hasEtPrefix = false;
           word.etGuessed = false;
         }
-      });
+        
+        // Clear rejected heuristics in range
+        word.rejectedHeuristics?.clear();
+      }
       
-      // Rerun all heuristics
-      applyNominativeChunkGuessing(newWords);
-      applyPrepositionalGuessing(newWords);
-      applyAdjectiveNounGuessing(newWords);
-      applyPrepositionalBracketGuessing(newWords);
-      applyReversePrepositionalBracketGuessing(newWords);
-      applyQueEtGuessing(newWords);
-      applyGenitiveHeuristic(newWords);
-      applyAdjacentAgreementGuessing(newWords);
+      // Extract the range as a slice for heuristic processing
+      const rangeWords = newWords.slice(startIndex, endIndex + 1);
+      
+      // Run heuristics on the range
+      applyPrepositionIdentification(rangeWords);
+      applyNominativeChunkGuessing(rangeWords);
+      applyPrepositionalGuessing(rangeWords);
+      applyAdjectiveNounGuessing(rangeWords);
+      applyPrepositionalBracketGuessing(rangeWords);
+      applyQueEtGuessing(rangeWords);
+      applyGenitiveHeuristic(rangeWords);
+      applyAdjacentAgreementGuessing(rangeWords);
+      
+      applyRelativePronounHeuristic(rangeWords);
+      applyDativeIndirectObjectHeuristic(rangeWords);
+      applyAppositionHeuristic(rangeWords);
+      applyAccusativeInfinitiveHeuristic(rangeWords);
+      applyTemporalClauseHeuristic(rangeWords);
+      applyComparativeHeuristic(rangeWords);
+      applyAblativeMeansHeuristic(rangeWords);
+      applyAblativeAgentHeuristic(rangeWords);
+      applyAblativeAbsoluteHeuristic(rangeWords);
+      
+      applyParticipleModifierHeuristic(rangeWords);
+      applyLinkingVerbHeuristic(rangeWords);
+      applyComplementaryInfinitiveHeuristic(rangeWords);
+      applyVocativeHeuristic(rangeWords);
+      applyPurposeClauseHeuristic(rangeWords);
+      
+      applySumHeuristic(rangeWords);
+      applyPrepositionInference(rangeWords);
+      applyAdjectiveAgreementInference(rangeWords);
+      applyParticipleBraceHeuristic(rangeWords);
+      
+      // Put the processed range back into the main array
+      for (let i = 0; i < rangeWords.length; i++) {
+        newWords[startIndex + i] = rangeWords[i];
+      }
       
       setAnalyzerWords(newWords);
       setIsLoading(false);
@@ -1502,15 +839,22 @@ export default function Home() {
           type: interactionMode.annotationType,
           targetIndex: index,
         });
+        setAnalyzerWords(newWords);
+        setInteractionMode(null);
       } else if (interactionMode.type === "select-range") {
         sourceWord.annotations.push({
           type: interactionMode.annotationType,
           endIndex: index,
         });
+        setAnalyzerWords(newWords);
+        setInteractionMode(null);
+      } else if (interactionMode.type === "select-heuristic-range") {
+        // Rerun heuristics from sourceIndex to index
+        const startIndex = Math.min(interactionMode.sourceIndex, index);
+        const endIndex = Math.max(interactionMode.sourceIndex, index);
+        setInteractionMode(null);
+        rerunHeuristicsInRange(startIndex, endIndex);
       }
-
-      setAnalyzerWords(newWords);
-      setInteractionMode(null);
     } else {
       // Normal Click - Open Dialog
       const word = analyzerWords[index];
@@ -1529,8 +873,15 @@ export default function Home() {
     }
     
     if (!word.selectedEntry) {
-      if (word.lookupResults && word.lookupResults.length > 0)
+      if (word.lookupResults && word.lookupResults.length > 0) {
+        // Get possible cases for split-color display on hover
+        const possibleCases = getPossibleCases(word.lookupResults);
+        if (possibleCases.length > 1) {
+          // Return base classes with dark text for visibility, split colors show on hover only
+          return "border-b-2 border-gray-300 hover-split-color relative transition-colors text-gray-900 font-semibold";
+        }
         return "border-b-2 border-gray-300 hover:bg-gray-100";
+      }
       return "border-transparent";
     }
 
@@ -1551,6 +902,107 @@ export default function Home() {
     }
 
     return classes.join(" ");
+  };
+
+  // Get all possible cases from lookup results
+  const getPossibleCases = (entries: WordEntry[]): TagType[] => {
+    const cases = new Set<TagType>();
+    
+    entries.forEach(entry => {
+      if (entry.type === "Noun" || entry.type === "Adjective" || entry.type === "Participle") {
+        entry.morphologies.forEach((morphology) => {
+          if (morphology) {
+            const analysis = morphology.analysis || morphology.line || "";
+            if (analysis.includes("Nominative")) cases.add("NOM");
+            if (analysis.includes("Accusative")) cases.add("ACC");
+            if (analysis.includes("Genitive")) cases.add("GEN");
+            if (analysis.includes("Dative")) cases.add("DAT");
+            if (analysis.includes("Ablative")) cases.add("ABL");
+            if (analysis.includes("Vocative")) cases.add("VOC");
+            if (analysis.includes("Locative")) cases.add("LOC");
+          }
+        });
+      } else if (entry.type === "Verb") {
+        entry.morphologies.forEach((morphology) => {
+          if (morphology) {
+            const analysis = morphology.analysis || morphology.line || "";
+            if (analysis.includes("Infinitive")) {
+              cases.add("INF");
+            }
+          }
+        });
+      } else if (entry.type === "Adverb") {
+        cases.add("ADV");
+      } else if (entry.type === "Other") {
+        // Check if it's a pronoun with cases
+        const isPronoun = entry.morphologies.some(m => 
+          (m.analysis || m.line || "").includes("Pronoun")
+        );
+        
+        if (isPronoun) {
+          entry.morphologies.forEach((morphology) => {
+            if (morphology) {
+              const analysis = morphology.analysis || morphology.line || "";
+              if (analysis.includes("Nominative")) cases.add("NOM");
+              if (analysis.includes("Accusative")) cases.add("ACC");
+              if (analysis.includes("Genitive")) cases.add("GEN");
+              if (analysis.includes("Dative")) cases.add("DAT");
+              if (analysis.includes("Ablative")) cases.add("ABL");
+              if (analysis.includes("Vocative")) cases.add("VOC");
+              if (analysis.includes("Locative")) cases.add("LOC");
+            }
+          });
+        } else {
+          // Other word types
+          if (entry.pos === "CONJ") cases.add("CONJ");
+          if (entry.pos === "PREP") cases.add("PREP");
+          if (entry.pos === "INTERJ") cases.add("INTERJ");
+        }
+      }
+    });
+    
+    // Return sorted array for consistent ordering
+    const caseArray = Array.from(cases);
+    return caseArray.sort();
+  };
+
+  // Create gradient background for split colors (on hover only)
+  const getSplitColorStyle = (cases: TagType[]): React.CSSProperties => {
+    if (cases.length === 0 || cases.length === 1) return {};
+    
+    // Create gradient stops for multiple colors
+    const colors = cases.map(c => {
+      const bgClass = TAG_CONFIG[c].bgClass;
+      // Extract color from Tailwind class like "bg-red-200"
+      const colorMap: Record<string, string> = {
+        "bg-red-200": "#fecaca",
+        "bg-blue-200": "#bfdbfe",
+        "bg-green-200": "#bbf7d0",
+        "bg-orange-200": "#fed7aa",
+        "bg-indigo-200": "#c7d2fe",
+        "bg-yellow-200": "#fef08a",
+        "bg-violet-200": "#ddd6fe",
+        "bg-cyan-200": "#a5f3fc",
+        "bg-pink-200": "#fbcfe8",
+        "bg-amber-200": "#fde68a",
+        "bg-lime-200": "#d9f99d",
+        "bg-emerald-200": "#a7f3d0",
+        "bg-zinc-200": "#e4e4e7",
+      };
+      return colorMap[bgClass] || "#e5e7eb";
+    });
+    
+    // Create gradient with equal splits
+    const step = 100 / cases.length;
+    const gradientStops = colors.map((color, i) => {
+      const start = i * step;
+      const end = (i + 1) * step;
+      return `${color} ${start}%, ${color} ${end}%`;
+    }).join(", ");
+    
+    return {
+      "--split-gradient": `linear-gradient(to right, ${gradientStops})`,
+    } as React.CSSProperties;
   };
 
   const getWordPadding = () => {
@@ -1622,7 +1074,8 @@ export default function Home() {
     
     const handleGuessClick = (e: React.MouseEvent) => {
       e.stopPropagation();
-      setSelectedWordIndex(wordIndex); // Open selection dialog instead
+      // Show heuristic confirmation dialog
+      setGuessConfirmation({ wordIndex, annotationIndex: undefined, type: "selection" });
     };
     
     if (tag) {
@@ -1733,13 +1186,33 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center py-12 px-4 sm:px-6 lg:px-8">
+      {/* CSS for hover-only split colors */}
+      <style jsx>{`
+        .hover-split-color:hover {
+          background: var(--split-gradient) !important;
+        }
+      `}</style>
+      
       {/* Loading Spinner Overlay */}
       {(loading || isLoading) && (
         <div className="fixed inset-0 bg-black/20 z-50 flex items-center justify-center">
           <div className="bg-white p-6 rounded-lg shadow-xl flex flex-col items-center gap-3">
-            <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            {loading ? (
+              <InfinitySpin
+                width="200"
+                color="#3b82f6"
+                ariaLabel="infinity-spin-loading"
+              />
+            ) : (
+              <Triangle
+                height="80"
+                width="80"
+                color="#3b82f6"
+                ariaLabel="triangle-loading"
+              />
+            )}
             <p className="text-sm font-medium text-gray-700">
-              {loading ? "Loading dictionary data..." : "Calculating heuristics..."}
+              {loading ? "Looking up words..." : "Calculating heuristics..."}
             </p>
           </div>
         </div>
@@ -1750,12 +1223,16 @@ export default function Home() {
         <div className="fixed inset-0 bg-black/10 cursor-crosshair z-50 flex items-start justify-center pt-10 pointer-events-none">
           <div className="bg-white p-2 rounded shadow-lg pointer-events-auto">
             <p className="text-sm font-bold">
-              Select{" "}
-              {interactionMode.annotationType === "possession"
-                ? "Possessor"
-                : interactionMode.annotationType === "modify"
-                  ? "Noun"
-                  : "End of Scope"}
+              {interactionMode.type === "select-heuristic-range" 
+                ? "Select End of Range (heuristics will rerun)"
+                : `Select ${
+                    interactionMode.annotationType === "possession"
+                      ? "Possessor"
+                      : interactionMode.annotationType === "modify"
+                        ? "Noun"
+                        : "End of Scope"
+                  }`
+              }
             </p>
             <Button
               size="sm"
@@ -1913,6 +1390,11 @@ export default function Home() {
                                                                 ${interactionMode ? "hover:ring-2 ring-indigo-500" : ""}
                                                                 ${getWordPadding()}
                                                             `}
+                                  style={
+                                    !word.selectedEntry && word.lookupResults 
+                                      ? getSplitColorStyle(getPossibleCases(word.lookupResults))
+                                      : undefined
+                                  }
                                 >
                                   {renderWordText(word)}
                                   {renderBadge(word, i)}
@@ -2398,6 +1880,82 @@ export default function Home() {
         </Dialog>
 
         {/* Guess Confirmation Dialog (for annotations only) */}
+        {guessConfirmation && guessConfirmation.type === "selection" && (() => {
+          const { wordIndex } = guessConfirmation;
+          const word = analyzerWords[wordIndex];
+          
+          const confirmGuess = () => {
+            // Keep the selection, just remove the guessed flag
+            const newWords = [...analyzerWords];
+            newWords[wordIndex].guessed = false;
+            newWords[wordIndex].heuristic = undefined;
+            setAnalyzerWords(newWords);
+            setGuessConfirmation(null);
+          };
+          
+          const revokeGuess = () => {
+            // Clear the selection and mark as rejected
+            const newWords = [...analyzerWords];
+            const heuristicId = `${newWords[wordIndex].selectedEntry?.type}-${wordIndex}`;
+            if (!newWords[wordIndex].rejectedHeuristics) {
+              newWords[wordIndex].rejectedHeuristics = new Set();
+            }
+            newWords[wordIndex].rejectedHeuristics!.add(heuristicId);
+            newWords[wordIndex].selectedEntry = undefined;
+            newWords[wordIndex].selectedMorphology = undefined;
+            newWords[wordIndex].guessed = false;
+            newWords[wordIndex].heuristic = undefined;
+            setAnalyzerWords(newWords);
+            setGuessConfirmation(null);
+          };
+          
+          const openSelection = () => {
+            // Open definition selection dialog
+            setSelectedWordIndex(wordIndex);
+            setGuessConfirmation(null);
+          };
+          
+          return (
+            <Dialog open={true} onOpenChange={() => setGuessConfirmation(null)}>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Heuristic Word Selection</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="bg-orange-50 p-3 rounded border border-orange-200">
+                    <p className="text-sm text-orange-900">
+                      <strong>Word:</strong> {word.original}
+                    </p>
+                    {word.selectedEntry && (
+                      <p className="text-sm text-orange-800 mt-1">
+                        <strong>Selected as:</strong> {word.selectedEntry.type}
+                        {word.selectedMorphology && ` (${word.selectedMorphology})`}
+                      </p>
+                    )}
+                    {word.heuristic && (
+                      <p className="text-sm text-orange-800 mt-2">
+                        <strong>Reasoning:</strong> {word.heuristic}
+                      </p>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-700">Is this interpretation correct?</p>
+                  <div className="flex flex-col gap-2">
+                    <Button onClick={confirmGuess} variant="default">
+                      Confirm
+                    </Button>
+                    <Button onClick={openSelection} variant="outline">
+                      Choose Different Meaning
+                    </Button>
+                    <Button onClick={revokeGuess} variant="destructive">
+                      Reject & Clear
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+          );
+        })()}
+
         {guessConfirmation && guessConfirmation.type === "annotation" && (() => {
           const { wordIndex, annotationIndex } = guessConfirmation;
           const word = analyzerWords[wordIndex];
@@ -2897,16 +2455,59 @@ export default function Home() {
                 </button>
                 <div className="border-t my-1"></div>
                 <button
+                  className="w-full text-left px-4 py-2 text-sm hover:bg-blue-50 text-blue-600 flex items-center gap-2"
+                  onClick={() => {
+                    setInteractionMode({
+                      type: "select-heuristic-range",
+                      sourceIndex: contextMenu.wordIndex,
+                      annotationType: "modify", // dummy value, not used
+                    });
+                    setContextMenu(null);
+                  }}
+                >
+                  <ArrowRight className="w-3 h-3" /> Select Range to Rerun Heuristics
+                </button>
+                <div className="border-t my-1"></div>
+                <button
                   className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 text-red-600"
                   onClick={() => {
-                    // Clear annotations for this word
+                    // Clear annotations for this word (outgoing)
                     const newWords = [...analyzerWords];
                     newWords[contextMenu.wordIndex].annotations = [];
                     setAnalyzerWords(newWords);
                     setContextMenu(null);
                   }}
                 >
-                  Clear Annotations
+                  Clear Outgoing Connections
+                </button>
+                <button
+                  className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 text-red-600"
+                  onClick={() => {
+                    // Clear annotations pointing TO this word (incoming)
+                    const newWords = [...analyzerWords];
+                    const targetIdx = contextMenu.wordIndex;
+                    
+                    // Find all words that have annotations pointing to this word
+                    newWords.forEach((word, idx) => {
+                      if (idx === targetIdx) return;
+                      
+                      // Filter out annotations that target this word
+                      word.annotations = word.annotations.filter(ann => {
+                        if (ann.type === "preposition-scope") {
+                          return ann.targetIndex !== targetIdx;
+                        }
+                        if (ann.type === "modify" || ann.type === "possession") {
+                          return ann.targetIndex !== targetIdx;
+                        }
+                        return true;
+                      });
+                    });
+                    
+                    setAnalyzerWords(newWords);
+                    setContextMenu(null);
+                  }}
+                >
+                  Clear Incoming Connections
                 </button>
               </div>
             );

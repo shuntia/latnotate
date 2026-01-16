@@ -1,0 +1,143 @@
+import { SentenceWord } from "@/lib/types/sentence";
+import { getCaseGenderNumber } from "@/lib/utils/morphology";
+
+/**
+ * Enhanced preposition inference: If a potential preposition is followed by a word
+ * that could agree with the preposition's case requirements, infer that it's a preposition
+ * and build brackets around the phrase.
+ */
+export const applyPrepositionInference = (words: SentenceWord[]): void => {
+  words.forEach((word, idx) => {
+    // Skip if already selected
+    if (word.selectedEntry) return;
+    
+    const entries = word.lookupResults || [];
+    
+    // Find potential preposition entries
+    const prepEntries = entries.filter(entry => 
+      entry.type === "Other" && 
+      entry.morphologies.some(m => (m.analysis || m.line || "").includes("Preposition"))
+    );
+    
+    if (prepEntries.length === 0) return;
+    
+    // Look at the next word
+    if (idx + 1 >= words.length) return;
+    const nextWord = words[idx + 1];
+    
+    // Check if next word has lookup results
+    if (!nextWord.lookupResults || nextWord.lookupResults.length === 0) return;
+    
+    // Extract cases this preposition can take
+    const prepCases = new Map<string, { entry: any; morph: any }>();
+    
+    for (const entry of prepEntries) {
+      for (const morph of entry.morphologies) {
+        const analysis = morph.analysis || morph.line || "";
+        if (!analysis.includes("Preposition")) continue;
+        
+        if (analysis.match(/w\/(Accusative|ACC)/i)) {
+          prepCases.set("Accusative", { entry, morph });
+        }
+        if (analysis.match(/w\/(Ablative|ABL)/i)) {
+          prepCases.set("Ablative", { entry, morph });
+        }
+      }
+    }
+    
+    if (prepCases.size === 0) return;
+    
+    // Check if next word can be in one of the preposition's required cases
+    // If multiple cases work, prefer the one with better evidence
+    type CaseMatch = {
+      case: string;
+      entry: any;
+      morph: any;
+      matchCount: number; // How many entries of nextWord can be this case
+    };
+    
+    const viableMatches: CaseMatch[] = [];
+    
+    for (const [requiredCase, { entry, morph }] of prepCases.entries()) {
+      let matchCount = 0;
+      
+      for (const nextEntry of nextWord.lookupResults) {
+        if (nextEntry.type !== "Noun" && nextEntry.type !== "Adjective" && nextEntry.type !== "Participle") {
+          continue;
+        }
+        
+        const hasCase = nextEntry.morphologies.some(nextMorph => {
+          const nextAnalysis = nextMorph.analysis || nextMorph.line || "";
+          return nextAnalysis.includes(requiredCase);
+        });
+        
+        if (hasCase) matchCount++;
+      }
+      
+      if (matchCount > 0) {
+        viableMatches.push({ case: requiredCase, entry, morph, matchCount });
+      }
+    }
+    
+    // If no viable matches, return
+    if (viableMatches.length === 0) return;
+    
+    // Sort by match count (prefer cases with more evidence)
+    viableMatches.sort((a, b) => b.matchCount - a.matchCount);
+    
+    // Pick the best match
+    const bestMatch = viableMatches[0];
+    
+    // Reject if already rejected
+    const heuristicId = `prep-infer-${idx}`;
+    if (word.rejectedHeuristics?.has(heuristicId)) return;
+    
+    // Infer that this is a preposition
+    word.selectedEntry = bestMatch.entry;
+    word.selectedMorphology = bestMatch.morph.analysis || bestMatch.morph.line;
+    word.guessed = true;
+    word.heuristic = `Inferred preposition "${word.original}" taking ${bestMatch.case} (next word can be ${bestMatch.case})`;
+    
+    // Now build the bracket
+    // Find the end of the phrase (consecutive agreeing words)
+    let endIdx = idx + 1;
+    
+    const requiredCase = bestMatch.case;
+    
+    for (let i = idx + 2; i < Math.min(idx + 8, words.length); i++) {
+      const candidate = words[i];
+      if (!candidate.lookupResults || candidate.lookupResults.length === 0) break;
+      
+      // Check if this word can also be in the required case
+      const canMatch = candidate.lookupResults.some(entry => {
+        if (entry.type !== "Noun" && entry.type !== "Adjective" && entry.type !== "Participle") {
+          return false;
+        }
+        return entry.morphologies.some(m => {
+          const analysis = m.analysis || m.line || "";
+          return analysis.includes(requiredCase);
+        });
+      });
+      
+      if (canMatch) {
+        endIdx = i;
+      } else {
+        break;
+      }
+    }
+    
+    // Add bracket annotation
+    const existingBracket = word.annotations.find(
+      (a) => a.type === "preposition-scope" && a.endIndex === endIdx
+    );
+    
+    if (!existingBracket) {
+      word.annotations.push({
+        type: "preposition-scope",
+        endIndex: endIdx,
+        guessed: true,
+        heuristic: `Prepositional phrase with ${requiredCase} object`,
+      });
+    }
+  });
+};

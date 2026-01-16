@@ -174,19 +174,25 @@ The system automatically suggests grammatical relationships. All suggestions sho
 - Select "ad"
 - → "forum" suggested as accusative object
 
-### Reverse Preposition Guessing
+### Context-Based Preposition Inference
 
 **When it triggers:**
-- You select accusative or ablative word
+- During automatic analysis or after word selection
 
 **What happens:**
-- Checks previous word for preposition
-- Suggests preposition if case matches
-- Shows "?" on preposition
+- Detects potential prepositions (like "in", "ab", "cum")
+- Checks if following word can match preposition's required case
+- Automatically selects correct preposition form
+- For ambiguous prepositions ("in" = ABL or ACC):
+  - Checks next word's possible cases
+  - Selects ACC if next word can be accusative (motion)
+  - Selects ABL if next word can be ablative (location)
+- Shows "?" on preposition if inferred
 
-**Example:**
-- Select "amico" as ablative
-- → "cum" suggested as preposition
+**Examples:**
+- "in urbem" → "urbem" is accusative → selects "in" as ACC preposition (into)
+- "in urbe" → "urbe" can be ablative → selects "in" as ABL preposition (in)
+- "ab agricola" → "agricola" can be ablative → selects "ab" as ABL preposition (from)
 
 ### Adjacent Agreement
 
@@ -201,6 +207,44 @@ The system automatically suggests grammatical relationships. All suggestions sho
 **Example:**
 - Select "puella" (nominative singular feminine)
 - → Connection to adjacent "magna" (also nom. sg. fem.)
+
+### Participles Treated as Adjectives
+
+**Automatic handling:**
+- Participles (verbal adjectives) are treated like adjectives throughout
+- They connect to nouns they describe
+- They're included in agreement checking
+- They can be suggested as substantives (adjectives used as nouns)
+
+**Examples:**
+- "miles currens" → "currens" (participle) connects to "miles" (noun)
+- "ambulans videt" → "ambulans" can be nominative subject (substantive use)
+
+### Split Color Boxes for Ambiguous Cases
+
+**When displayed:**
+- Hover over word with multiple possible cases (before selection)
+
+**What it shows:**
+- Box splits into colored sections for each possible case
+- Example: Word that could be ABL or DAT shows orange/green split
+- Helps visualize grammatical ambiguity at a glance
+
+### Rerun Heuristics
+
+**Available options:**
+
+1. **"Rerun All Heuristics"** button (top of page)
+   - Preserves your confirmed selections
+   - Only clears rejected heuristics
+   - Re-applies all automatic guessing based on current state
+   - Useful after manually selecting several words
+
+2. **"Select Range to Rerun Heuristics"** (right-click menu)
+   - Click first word, then last word
+   - Only reruns heuristics for words in that range
+   - Surgical fix for problematic sections
+   - Blue overlay shows selected range
 
 ### Nominative Phrases
 

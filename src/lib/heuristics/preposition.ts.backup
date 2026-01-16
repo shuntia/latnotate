@@ -1,0 +1,427 @@
+import { SentenceWord } from "@/lib/types/sentence";
+import { getCaseGenderNumber } from "@/lib/utils/morphology";
+import { cleanWord, getGuaranteedCase, getSelectedPrepositionCases } from "@/lib/utils/word-helpers";
+import { isConjunction } from "@/lib/utils/word-helpers";
+
+export const applyPrepositionalBracketGuessing = (words: SentenceWord[]): void => {
+  words.forEach((word, idx) => {
+    if (!word.selectedEntry) return;
+    const isPrep = word.selectedEntry.type === "Other" && 
+                   word.selectedMorphology?.includes("Preposition");
+    
+    if (!isPrep) return;
+
+    const requiredCases = getSelectedPrepositionCases(word);
+    if (!requiredCases) return;
+
+    // Look for the object (next matching case noun/adjective)
+    for (let i = idx + 1; i < Math.min(idx + 5, words.length); i++) {
+      const candidate = words[i];
+      if (!candidate.selectedEntry || !candidate.selectedMorphology) continue;
+
+      const cgn = getCaseGenderNumber(candidate.selectedMorphology);
+      if (!cgn) continue;
+
+      // Check if this word matches the required case
+      if (requiredCases.includes(cgn.case)) {
+        // Find the end of the prepositional phrase (last matching adjective/noun in sequence)
+        let endIdx = i;
+        for (let j = i + 1; j < words.length; j++) {
+          const next = words[j];
+          if (!next.selectedEntry || !next.selectedMorphology) break;
+          
+          const nextCgn = getCaseGenderNumber(next.selectedMorphology);
+          if (!nextCgn) break;
+          
+          // Continue if matches case (adjectives modifying the noun)
+          if (nextCgn.case === cgn.case && nextCgn.number === cgn.number &&
+              (next.selectedEntry.type === "Adjective" || next.selectedEntry.type === "Participle" || next.selectedEntry.type === "Noun")) {
+            endIdx = j;
+          } else {
+            break;
+          }
+        }
+        
+        // Check if next token after endIdx is a conjunction
+        // If so, peek ahead to see if we have another word with matching case
+        if (endIdx + 1 < words.length) {
+          const nextAfterEnd = words[endIdx + 1];
+          if (isConjunction(nextAfterEnd) && endIdx + 2 < words.length) {
+            const candidateAfterConj = words[endIdx + 2];
+            if (candidateAfterConj.selectedEntry && candidateAfterConj.selectedMorphology) {
+              const cgnAfterConj = getCaseGenderNumber(candidateAfterConj.selectedMorphology);
+              
+              // If the word after conjunction has same case, extend the bracket
+              if (cgnAfterConj && cgnAfterConj.case === cgn.case) {
+                // Extend to include the conjunction and the matching word
+                endIdx = endIdx + 2;
+                
+                // Continue extending if more matching words follow
+                for (let k = endIdx + 1; k < words.length; k++) {
+                  const followingWord = words[k];
+                  if (!followingWord.selectedEntry || !followingWord.selectedMorphology) break;
+                  
+                  const followingCgn = getCaseGenderNumber(followingWord.selectedMorphology);
+                  if (!followingCgn) break;
+                  
+                  if (followingCgn.case === cgn.case && followingCgn.number === cgnAfterConj.number &&
+                      (followingWord.selectedEntry.type === "Adjective" || 
+                       followingWord.selectedEntry.type === "Participle" || 
+                       followingWord.selectedEntry.type === "Noun")) {
+                    endIdx = k;
+                  } else {
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // Create bracket annotation if it doesn't exist
+        const existingBracket = word.annotations.find(
+          (a) => a.type === "preposition-scope"
+        );
+
+        // Check if this specific bracket was previously rejected
+        if (word.rejectedHeuristics?.has(`preposition-scope-${endIdx}`)) return;
+
+        if (!existingBracket) {
+          word.annotations.push({
+            type: "preposition-scope",
+            endIndex: endIdx,
+            guessed: true,
+            heuristic: `Prepositional phrase: ${word.original} + ${cgn.case} object`,
+          });
+        }
+        return;
+      }
+    }
+  });
+};
+
+export const applyReversePrepositionalBracketGuessing = (words: SentenceWord[]): void => {
+  words.forEach((word, idx) => {
+    // Only apply if this word was heuristically guessed (not manually selected)
+    if (!word.selectedEntry || !word.selectedMorphology || !word.guessed) return;
+
+    const cgn = getCaseGenderNumber(word.selectedMorphology);
+    if (!cgn) return;
+
+    // Only care about accusative or ablative (common prepositional cases)
+    if (cgn.case !== "Accusative" && cgn.case !== "Ablative") return;
+
+    // Look backward through adjacent adjectives/nouns to find a preposition
+    let prepIdx = -1;
+
+    // Walk backward through matching case adjectives/nouns
+    for (let i = idx - 1; i >= 0; i--) {
+      const candidate = words[i];
+      if (!candidate.selectedEntry || !candidate.selectedMorphology) break;
+
+      const candidateCgn = getCaseGenderNumber(candidate.selectedMorphology);
+      
+      // Check if it's a preposition
+      const isPrep = candidate.selectedEntry.type === "Other" && 
+                     candidate.selectedMorphology.includes("Preposition");
+      
+      if (isPrep) {
+        // Found a preposition! Check if it matches the case
+        const requiredCases = getSelectedPrepositionCases(candidate);
+        
+        if (requiredCases && requiredCases.includes(cgn.case)) {
+          prepIdx = i;
+          break;
+        }
+      } else if (candidateCgn && candidateCgn.case === cgn.case && candidateCgn.number === cgn.number &&
+                 (candidate.selectedEntry.type === "Adjective" || 
+                  candidate.selectedEntry.type === "Participle" || 
+                  candidate.selectedEntry.type === "Noun")) {
+        // Continue backward through matching adjectives/nouns
+        continue;
+      } else {
+        // Different case or non-matching type, stop
+        break;
+      }
+    }
+
+    // If we found a preposition, create the bracket
+    if (prepIdx >= 0) {
+      const prep = words[prepIdx];
+      
+      // Find the end of the phrase (last matching word)
+      let endIdx = idx;
+      for (let j = idx + 1; j < words.length; j++) {
+        const next = words[j];
+        if (!next.selectedEntry || !next.selectedMorphology) break;
+        
+        const nextCgn = getCaseGenderNumber(next.selectedMorphology);
+        if (!nextCgn) break;
+        
+        // Continue if matches case
+        if (nextCgn.case === cgn.case && nextCgn.number === cgn.number &&
+            (next.selectedEntry.type === "Adjective" || 
+             next.selectedEntry.type === "Participle" || 
+             next.selectedEntry.type === "Noun")) {
+          endIdx = j;
+        } else {
+          break;
+        }
+      }
+      
+      // Check if next token after endIdx is a conjunction
+      // If so, peek ahead to see if we have another word with matching case
+      if (endIdx + 1 < words.length) {
+        const nextAfterEnd = words[endIdx + 1];
+        if (isConjunction(nextAfterEnd) && endIdx + 2 < words.length) {
+          const candidateAfterConj = words[endIdx + 2];
+          if (candidateAfterConj.selectedEntry && candidateAfterConj.selectedMorphology) {
+            const cgnAfterConj = getCaseGenderNumber(candidateAfterConj.selectedMorphology);
+            
+            // If the word after conjunction has same case, extend the bracket
+            if (cgnAfterConj && cgnAfterConj.case === cgn.case) {
+              // Extend to include the conjunction and the matching word
+              endIdx = endIdx + 2;
+              
+              // Continue extending if more matching words follow
+              for (let k = endIdx + 1; k < words.length; k++) {
+                const followingWord = words[k];
+                if (!followingWord.selectedEntry || !followingWord.selectedMorphology) break;
+                
+                const followingCgn = getCaseGenderNumber(followingWord.selectedMorphology);
+                if (!followingCgn) break;
+                
+                if (followingCgn.case === cgn.case && followingCgn.number === cgnAfterConj.number &&
+                    (followingWord.selectedEntry.type === "Adjective" || 
+                     followingWord.selectedEntry.type === "Participle" || 
+                     followingWord.selectedEntry.type === "Noun")) {
+                  endIdx = k;
+                } else {
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Create bracket if it doesn't exist
+      const existingBracket = prep.annotations.find(
+        (a) => a.type === "preposition-scope"
+      );
+
+      // Check if this specific bracket was previously rejected
+      if (prep.rejectedHeuristics?.has(`preposition-scope-${endIdx}`)) return;
+
+      if (!existingBracket) {
+        prep.annotations.push({
+          type: "preposition-scope",
+          endIndex: endIdx,
+          guessed: true,
+          heuristic: `Prepositional phrase: ${prep.original} + ${cgn.case} object (detected from object)`,
+        });
+      }
+    }
+  });
+};
+
+export const applyPrepositionalGuessing = (words: SentenceWord[]): void => {
+  // Forward pass: preposition already selected, guess object
+  words.forEach((word, idx) => {
+    if (!word.selectedEntry) return;
+    const isPrep = word.selectedEntry.type === "Other" && 
+                   word.selectedMorphology?.includes("Preposition");
+    
+    if (!isPrep) return;
+
+    const requiredCases = getSelectedPrepositionCases(word);
+    if (!requiredCases) return;
+
+    // Helper to check if a word is genitive
+    const isGenitive = (w: SentenceWord): boolean => {
+      if (!w.selectedEntry || !w.selectedMorphology) return false;
+      const cgn = getCaseGenderNumber(w.selectedMorphology);
+      return cgn?.case === "Genitive";
+    };
+
+    // Look at next word(s) after the preposition, skipping genitives
+    for (let i = idx + 1; i < Math.min(idx + 8, words.length); i++) {
+      const candidate = words[i];
+      
+      // Skip genitive words - traverse across them
+      if (isGenitive(candidate)) continue;
+      
+      if (candidate.selectedEntry) continue;
+
+      // Check if prepositional object guess was previously rejected for this word
+      if (candidate.rejectedHeuristics?.has(`prep-object-${idx}`)) continue;
+
+      const entries = candidate.lookupResults || [];
+      if (entries.length === 0) continue;
+
+      // Check if ANY entry can be the required case
+      let canBeRequiredCase = false;
+      for (const entry of entries) {
+        const matchingMorphs = entry.morphologies.filter((m) =>
+          requiredCases.some((reqCase) => m.analysis.includes(reqCase))
+        );
+        if (matchingMorphs.length > 0) {
+          canBeRequiredCase = true;
+          break;
+        }
+      }
+      
+      // Reject heuristic if word cannot be the required case
+      if (!canBeRequiredCase) return;
+
+      for (const entry of entries) {
+        const matchingMorphs = entry.morphologies.filter((m) =>
+          requiredCases.some((reqCase) => m.analysis.includes(reqCase))
+        );
+
+        if (matchingMorphs.length === 1) {
+          candidate.selectedEntry = entry;
+          candidate.selectedMorphology = matchingMorphs[0].analysis;
+          candidate.guessed = true;
+          candidate.heuristic = `Object of "${word.original}" (requires ${requiredCases.join(" or ")})`;
+          
+          // Track that this candidate depends on the preposition
+          if (!word.dependentWords) word.dependentWords = new Set();
+          word.dependentWords.add(i);
+          
+          return;
+        } else if (matchingMorphs.length > 1 && requiredCases.length === 1) {
+          candidate.selectedEntry = entry;
+          candidate.selectedMorphology = matchingMorphs[0].analysis;
+          candidate.guessed = true;
+          candidate.heuristic = `Object of "${word.original}" (requires ${requiredCases[0]})`;
+          
+          // Track that this candidate depends on the preposition
+          if (!word.dependentWords) word.dependentWords = new Set();
+          word.dependentWords.add(i);
+          
+          return;
+        }
+      }
+    }
+  });
+
+  // Reverse pass: noun already selected, guess preposition before it
+  words.forEach((word, idx) => {
+    if (!word.selectedEntry || !word.selectedMorphology) return;
+    if (idx === 0) return;
+
+    const cgn = getCaseGenderNumber(word.selectedMorphology);
+    if (!cgn || (cgn.case !== "Accusative" && cgn.case !== "Ablative")) return;
+
+    // Look back for potential preposition
+    const prevWord = words[idx - 1];
+    if (prevWord.selectedEntry) return;
+
+    // Check if preposition guess was previously rejected for this word
+    if (prevWord.rejectedHeuristics?.has(`prep-guess-${idx}`)) return;
+
+    const entries = prevWord.lookupResults || [];
+    for (const entry of entries) {
+      if (entry.type !== "Other") continue;
+      
+      const prepMorphs = entry.morphologies.filter((m) =>
+        m.analysis.includes("Preposition")
+      );
+
+      if (prepMorphs.length === 0) continue;
+
+      // Check if ANY of the preposition morphologies can take the case we have
+      for (const morph of prepMorphs) {
+        const accMatch = morph.analysis.match(/w\/(Accusative|ACC)/i);
+        const ablMatch = morph.analysis.match(/w\/(Ablative|ABL)/i);
+        
+        const validCases: string[] = [];
+        if (accMatch) validCases.push("Accusative");
+        if (ablMatch) validCases.push("Ablative");
+        
+        if (validCases.includes(cgn.case)) {
+          prevWord.selectedEntry = entry;
+          prevWord.selectedMorphology = morph.analysis;
+          prevWord.guessed = true;
+          prevWord.heuristic = `Preposition before ${cgn.case} "${word.original}"`;
+          return;
+        }
+      }
+    }
+  });
+};
+
+export const applyPrepositionIdentification = (words: SentenceWord[]): void => {
+  words.forEach((word, idx) => {
+    if (word.selectedEntry) return; // Already selected
+    
+    const entries = word.lookupResults || [];
+    
+    // Find preposition entries
+    const prepEntries = entries.filter(entry => 
+      entry.type === "Other" && 
+      entry.morphologies.some(m => m.analysis.includes("Preposition"))
+    );
+    
+    if (prepEntries.length === 0) return;
+    
+    // Extract all possible cases this preposition can take
+    const allPossibleCases = new Set<string>();
+    for (const entry of prepEntries) {
+      for (const morph of entry.morphologies) {
+        if (!morph.analysis.includes("Preposition")) continue;
+        const accMatch = morph.analysis.match(/w\/(Accusative|ACC)/i);
+        const ablMatch = morph.analysis.match(/w\/(Ablative|ABL)/i);
+        if (accMatch) allPossibleCases.add("Accusative");
+        if (ablMatch) allPossibleCases.add("Ablative");
+      }
+    }
+    
+    if (allPossibleCases.size === 0) return;
+    const requiredCases = Array.from(allPossibleCases);
+    
+    // If this is a mixed preposition (can take multiple cases), check following word for guaranteed case
+    if (requiredCases.length > 1 && idx + 1 < words.length) {
+      const nextWord = words[idx + 1];
+      const guaranteedCase = getGuaranteedCase(nextWord);
+      
+      if (guaranteedCase && requiredCases.includes(guaranteedCase)) {
+        // Select the preposition morphology that matches the guaranteed case
+        const prepEntry = prepEntries[0];
+        const matchingMorph = prepEntry.morphologies.find(m => 
+          m.analysis.includes("Preposition") && m.analysis.includes(guaranteedCase)
+        );
+        
+        if (matchingMorph) {
+          word.selectedEntry = prepEntry;
+          word.selectedMorphology = matchingMorph.analysis;
+          word.guessed = true;
+          word.heuristic = `Preposition "${word.original}" taking ${guaranteedCase} (guaranteed by following word)`;
+          return;
+        }
+      }
+    }
+    
+    // If there's exactly one preposition entry, or if ALL entries are prepositions, guess it
+    // BUT: Only if it's unambiguous (single case) OR we have a guaranteed case from context
+    if (prepEntries.length === 1 || prepEntries.length === entries.length) {
+      // For multi-case prepositions, only select if we have exactly ONE possible case
+      if (requiredCases.length === 1) {
+        const prepEntry = prepEntries[0];
+        const prepMorph = prepEntry.morphologies.find(m => 
+          m.analysis.includes("Preposition") && m.analysis.includes(requiredCases[0])
+        );
+        
+        if (prepMorph) {
+          word.selectedEntry = prepEntry;
+          word.selectedMorphology = prepMorph.analysis;
+          word.guessed = true;
+          word.heuristic = `Guaranteed preposition "${word.original}" taking ${requiredCases[0]}`;
+        }
+      }
+      // For multi-case prepositions without guarantee, don't select anything
+      // Let applyPrepositionInference handle it based on context
+    }
+  });
+};
