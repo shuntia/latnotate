@@ -1,5 +1,8 @@
 # Latnotate
 
+NOTE:
+Please note that this repository is completely vibe coded with claude code. This is not an accurate representation of my work.
+
 A Latin sentence analyzer powered by Whitaker's Words. Analyze Latin text with automatic grammatical suggestions, visual annotations, and intelligent heuristics.
 
 ## Features
