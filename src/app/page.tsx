@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, lazy, Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +11,11 @@ import { InfinitySpin, Triangle } from "react-loader-spinner";
 import { Navigation } from "@/components/Navigation";
 import { Toaster, toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+// Lazy load tab components
+const DictionaryTab = lazy(() => import("@/components/tabs/DictionaryTab").then(m => ({ default: m.DictionaryTab })));
+const HelpTab = lazy(() => import("@/components/tabs/HelpTab").then(m => ({ default: m.HelpTab })));
+
 import {
   Dialog,
   DialogContent,
@@ -23,7 +28,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { WordEntry, LookupResult } from "@/lib/types";
+import { WordEntry, LookupResult, Morphology } from "@/lib/types";
 import {
   TagType,
   Annotation,
@@ -105,7 +110,6 @@ export default function Home() {
   const wordRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [lines, setLines] = useState<React.ReactNode[]>([]);
-  const [maxLineDepth, setMaxLineDepth] = useState(0);
 
   // Keyboard navigation for definitions and word selection
   useEffect(() => {
@@ -349,7 +353,6 @@ export default function Home() {
       });
     });
     setLines(newLines);
-    setMaxLineDepth(currentMaxDepth);
   }, [analyzerWords, interactionMode, showRelationshipLines]); // Re-run when words, mode, or toggle changes
 
   const handleLookup = async (mode: "dictionary" | "analyzer") => {
@@ -467,7 +470,46 @@ export default function Home() {
                   word.lookupResults = result.entries;
 
                   // Auto-select logic
-                  if (result.entries.length === 1) {
+                  // Priority 1: Forms of "sum" (to be) - always auto-select
+                  const sumForms = new Set([
+                    "sum", "es", "est", "sumus", "estis", "sunt",
+                    "eram", "eras", "erat", "eramus", "eratis", "erant",
+                    "ero", "eris", "erit", "erimus", "eritis", "erunt",
+                    "sim", "sis", "sit", "simus", "sitis", "sint",
+                    "essem", "esses", "esset", "essemus", "essetis", "essent",
+                    "fui", "fuisti", "fuit", "fuimus", "fuistis", "fuerunt", "fuere",
+                    "fueram", "fueras", "fuerat", "fueramus", "fueratis", "fuerant",
+                    "fuero", "fueris", "fuerit", "fuerimus", "fueritis", "fuerint",
+                    "fuerim", "fueritis",
+                    "fuissem", "fuisses", "fuisset", "fuissemus", "fuissetis", "fuissent",
+                    "esse", "fore", "futurus", "futura", "futurum"
+                  ]);
+                  
+                  const cleanForm = word.clean.toLowerCase();
+                  
+                  // Check if this is a form of sum
+                  if (sumForms.has(cleanForm)) {
+                    const sumEntry = result.entries.find(
+                      (entry: WordEntry) =>
+                        entry.type === "Verb" &&
+                        entry.forms.some((form: string) => sumForms.has(form.toLowerCase()))
+                    );
+                    
+                    if (sumEntry) {
+                      // Find matching morphology
+                      const matchingMorph = sumEntry.morphologies.find((m: Morphology) =>
+                        m.stem.replace(/\./g, "").toLowerCase() === cleanForm
+                      );
+                      
+                      if (matchingMorph) {
+                        word.selectedEntry = sumEntry;
+                        word.selectedMorphology = matchingMorph.analysis;
+                        word.heuristic = `Form of "sum" (to be) - auto-selected`;
+                      }
+                    }
+                  }
+                  // Priority 2: Single entry with no or single morphology
+                  else if (result.entries.length === 1) {
                     const entry = result.entries[0];
                     if (entry.morphologies.length === 0) {
                       word.selectedEntry = entry;
@@ -1939,6 +1981,13 @@ export default function Home() {
                           ✕
                         </Button>
                       </CardTitle>
+                      {selectedWord.heuristic && (
+                        <div className="mt-2 bg-amber-50 border border-amber-200 rounded-md p-2">
+                          <p className="text-xs text-amber-900">
+                            <span className="font-semibold">Heuristic:</span> {selectedWord.heuristic}
+                          </p>
+                        </div>
+                      )}
                       <p className="text-xs text-gray-500 mt-1">
                         Use ←→ to switch words, ↑↓ to navigate definitions, Enter to select
                       </p>
@@ -2129,97 +2178,33 @@ export default function Home() {
 
           {/* Dictionary Tab Content */}
           <TabsContent value="dictionary">
-            {dictionaryResult && dictionaryResult.results && (
-              <div className="space-y-4">
-                {dictionaryResult.results.flatMap((r) => r.entries).length ===
-                0 ? (
-                  <Alert>
-                    <AlertDescription>No definitions found.</AlertDescription>
-                  </Alert>
-                ) : (
-                  dictionaryResult.results.map((res, idx) => (
-                    <div key={idx} className="space-y-4">
-                      {dictionaryResult.results.length > 1 && (
-                        <h3 className="font-bold text-lg border-b pb-1 mt-6">
-                          {res.word}
-                        </h3>
-                      )}
-                      {res.entries.map((entry: WordEntry, i: number) => (
-                        <Card key={`${idx}-${i}`}>
-                          <CardHeader className="pb-2">
-                            <div className="flex justify-between items-start">
-                              <div className="flex flex-col">
-                                <CardTitle className="text-xl font-serif text-indigo-700">
-                                  {entry.forms.join(", ")}
-                                </CardTitle>
-                                <Badge variant="outline" className="w-fit mt-1">
-                                  {entry.type}
-                                </Badge>
-                              </div>
-                            </div>
-                          </CardHeader>
-                          <CardContent>
-                            <p className="text-gray-700 leading-relaxed whitespace-pre-line">
-                              {entry.definition}
-                            </p>
-                            {entry.morphologies.map((m, mi) => (
-                              <div
-                                key={mi}
-                                className="text-sm text-gray-500 mt-1 font-mono bg-gray-50 p-1 rounded"
-                              >
-                                {m.analysis} ({m.stem})
-                              </div>
-                            ))}
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
+            <Suspense fallback={
+              <Card>
+                <CardContent className="p-8 flex items-center justify-center">
+                  <div className="flex flex-col items-center gap-3">
+                    <Triangle height="40" width="40" color="#3b82f6" ariaLabel="loading" />
+                    <p className="text-sm text-gray-500">Loading dictionary...</p>
+                  </div>
+                </CardContent>
+              </Card>
+            }>
+              <DictionaryTab dictionaryResult={dictionaryResult} />
+            </Suspense>
           </TabsContent>
 
           <TabsContent value="help">
-            <Card>
-              <CardHeader>
-                <CardTitle>How to Use Latnotate</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <section>
-                  <h3 className="font-semibold text-lg mb-3">Quick Start</h3>
-                  <ol className="list-decimal list-inside space-y-2 ml-2 text-sm">
-                    <li>Type a Latin sentence in the text box</li>
-                    <li>Click &quot;Analyze Sentence&quot;</li>
-                    <li>Words appear color-coded automatically</li>
-                    <li>Click words to manually select forms if needed</li>
-                    <li>Right-click to create manual connections</li>
-                  </ol>
-                </section>
-
-                <section>
-                  <h3 className="font-semibold text-lg mb-3">General Usage</h3>
-                  <div className="space-y-2 text-sm">
-                    <p><strong>Automatic:</strong> 30+ heuristics analyze structure automatically</p>
-                    <p><strong>Manual Override:</strong> Click words to select forms, right-click for connections</p>
-                    <p><strong>Smart Ordering:</strong> Heuristics run in priority order to minimize cascading errors</p>
-                    <p><strong>Refinement:</strong> Use &quot;Rerun All Heuristics&quot; button to update analysis</p>
+            <Suspense fallback={
+              <Card>
+                <CardContent className="p-8 flex items-center justify-center">
+                  <div className="flex flex-col items-center gap-3">
+                    <Triangle height="40" width="40" color="#3b82f6" ariaLabel="loading" />
+                    <p className="text-sm text-gray-500">Loading help...</p>
                   </div>
-                </section>
-
-                <section>
-                  <h3 className="font-semibold text-lg mb-3">Advanced: Heuristics</h3>
-                  <div className="space-y-2 text-xs">
-                    <p><strong className="text-blue-600">Priority 1: Structural</strong> - &quot;sum&quot; forms, &quot;-que&quot; → &quot;et&quot;</p>
-                    <p><strong className="text-blue-600">Priority 2: Prepositions</strong> - Identification, inference, object selection, brackets</p>
-                    <p><strong className="text-blue-600">Priority 3: Relationships</strong> - Genitive possession</p>
-                    <p><strong className="text-blue-600">Priority 4: Agreement</strong> - Adjective-noun, adjacent agreement, participle braces</p>
-                    <p><strong className="text-blue-600">Priority 5: Sentence Structure</strong> - Nominative subjects, nominative chunks, apposition</p>
-                    <p><strong className="text-blue-600">Priority 6: Advanced</strong> - Relative clauses, dative objects, accusative+infinitive, temporal clauses, comparatives, ablatives, participles, linking verbs, complementary infinitives, vocatives, purpose clauses</p>
-                  </div>
-                </section>
-</CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            }>
+              <HelpTab />
+            </Suspense>
           </TabsContent>
         </Tabs>
 
