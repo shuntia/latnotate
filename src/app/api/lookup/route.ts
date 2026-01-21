@@ -499,44 +499,57 @@ export async function POST(req: NextRequest) {
 
       const readableStream = new ReadableStream({
         async start(controller) {
-          for (const word of wordsToLookup) {
-            const tempFile = path.join(
-              os.tmpdir(),
-              `latnotate-${Date.now()}-${Math.random().toString(36).substring(7)}.txt`,
-            );
-            // Remove accent marks before lookup
-            const cleanedWord = removeAccents(word);
-            fs.writeFileSync(tempFile, cleanedWord);
+          // Process words in batches to avoid overwhelming the system
+          const BATCH_SIZE = 5; // Process 5 words at a time
+          
+          for (let i = 0; i < wordsToLookup.length; i += BATCH_SIZE) {
+            const batch = wordsToLookup.slice(i, i + BATCH_SIZE);
+            
+            const lookupPromises = batch.map(async (word) => {
+              const tempFile = path.join(
+                os.tmpdir(),
+                `latnotate-${Date.now()}-${Math.random().toString(36).substring(7)}.txt`,
+              );
+              // Remove accent marks before lookup
+              const cleanedWord = removeAccents(word);
+              fs.writeFileSync(tempFile, cleanedWord);
 
-            try {
-              const { stdout } = await execFileAsync(binPath, [tempFile], {
-                cwd: baseDir,
-                timeout: 5000,
-              });
-
-              const parsed = parseWhitakersOutput(stdout);
-
-              // Sort entries for this word
-              parsed.entries.sort((a, b) => {
-                return calculateScore(b, word) - calculateScore(a, word);
-              });
-
-              // Send each result as a separate JSON chunk
-              const chunk =
-                JSON.stringify({ word, entries: parsed.entries }) + "\n";
-              controller.enqueue(encoder.encode(chunk));
-            } catch (error) {
-              console.error(`Error looking up ${word}:`, error);
-              const chunk = JSON.stringify({ word, entries: [] }) + "\n";
-              controller.enqueue(encoder.encode(chunk));
-            } finally {
               try {
-                fs.unlinkSync(tempFile);
-              } catch {
-                /* ignore */
+                const { stdout } = await execFileAsync(binPath, [tempFile], {
+                  cwd: baseDir,
+                  timeout: 5000,
+                });
+
+                const parsed = parseWhitakersOutput(stdout);
+
+                // Sort entries for this word
+                parsed.entries.sort((a, b) => {
+                  return calculateScore(b, word) - calculateScore(a, word);
+                });
+
+                return { word, entries: parsed.entries };
+              } catch (error) {
+                console.error(`Error looking up ${word}:`, error);
+                return { word, entries: [] };
+              } finally {
+                try {
+                  fs.unlinkSync(tempFile);
+                } catch {
+                  /* ignore */
+                }
               }
+            });
+
+            // Wait for batch to complete
+            const batchResults = await Promise.all(lookupPromises);
+            
+            // Stream results as they complete in batches
+            for (const result of batchResults) {
+              const chunk = JSON.stringify(result) + "\n";
+              controller.enqueue(encoder.encode(chunk));
             }
           }
+          
           controller.close();
         },
       });
@@ -550,46 +563,50 @@ export async function POST(req: NextRequest) {
     }
 
     // Non-streaming path (original behavior)
+    // Process words in batches to avoid overwhelming the system
+    const BATCH_SIZE = 5; // Process 5 words at a time
     const results: { word: string; entries: WordEntry[] }[] = [];
+    
+    for (let i = 0; i < wordsToLookup.length; i += BATCH_SIZE) {
+      const batch = wordsToLookup.slice(i, i + BATCH_SIZE);
+      
+      const lookupPromises = batch.map(async (word) => {
+        const tempFile = path.join(
+          os.tmpdir(),
+          `latnotate-${Date.now()}-${Math.random().toString(36).substring(7)}.txt`,
+        );
+        // Remove accent marks before lookup
+        const cleanedWord = removeAccents(word);
+        fs.writeFileSync(tempFile, cleanedWord);
 
-    // Process each word individually to allow proper sorting
-    // We execute sequentially to avoid overwhelming the server
-    for (const word of wordsToLookup) {
-      const tempFile = path.join(
-        os.tmpdir(),
-        `latnotate-${Date.now()}-${Math.random().toString(36).substring(7)}.txt`,
-      );
-      // Remove accent marks before lookup
-      const cleanedWord = removeAccents(word);
-      fs.writeFileSync(tempFile, cleanedWord);
-
-      try {
-        const { stdout } = await execFileAsync(binPath, [tempFile], {
-          cwd: baseDir,
-          timeout: 5000,
-        });
-
-        const parsed = parseWhitakersOutput(stdout);
-
-        // Sort entries for this word
-        parsed.entries.sort((a, b) => {
-          return calculateScore(b, word) - calculateScore(a, word);
-        });
-
-        results.push({
-          word,
-          entries: parsed.entries,
-        });
-      } catch (error) {
-        console.error(`Error looking up ${word}:`, error);
-        results.push({ word, entries: [] });
-      } finally {
         try {
-          fs.unlinkSync(tempFile);
-        } catch {
-          /* ignore */
+          const { stdout } = await execFileAsync(binPath, [tempFile], {
+            cwd: baseDir,
+            timeout: 5000,
+          });
+
+          const parsed = parseWhitakersOutput(stdout);
+
+          // Sort entries for this word
+          parsed.entries.sort((a, b) => {
+            return calculateScore(b, word) - calculateScore(a, word);
+          });
+
+          return { word, entries: parsed.entries };
+        } catch (error) {
+          console.error(`Error looking up ${word}:`, error);
+          return { word, entries: [] };
+        } finally {
+          try {
+            fs.unlinkSync(tempFile);
+          } catch {
+            /* ignore */
+          }
         }
-      }
+      });
+
+      const batchResults = await Promise.all(lookupPromises);
+      results.push(...batchResults);
     }
 
     return NextResponse.json({ results });

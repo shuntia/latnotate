@@ -404,6 +404,8 @@ export default function Home() {
         const resultMap = new Map<string, WordEntry[]>();
         let heuristicsStarted = false; // Track when we switch to heuristic phase
         let lastCompleteSentenceEnd = -1; // Track last sentence we've processed heuristics for
+        let pendingUpdates = 0; // Track how many results we've received since last render
+        const RENDER_BATCH_SIZE = 5; // Update UI every 5 results to reduce DOM thrashing
 
         // Helper to check if a word is a sentence separator
         const isSentenceSeparator = (word: SentenceWord): boolean => {
@@ -477,71 +479,83 @@ export default function Home() {
                 }
               });
 
-              // Check for newly completed sentences
+              pendingUpdates++;
+
+              // Only update UI every N results or when we have a complete sentence
               const sentenceEnds = findCompleteSentences();
+              const hasNewSentence = sentenceEnds.some(end => end > lastCompleteSentenceEnd);
+              
+              if (pendingUpdates >= RENDER_BATCH_SIZE || hasNewSentence) {
+                // Check for newly completed sentences
+                for (const sentenceEnd of sentenceEnds) {
+                  if (sentenceEnd > lastCompleteSentenceEnd) {
+                    // We have a new complete sentence!
+                    // Switch to heuristic mode if not already
+                    if (!heuristicsStarted) {
+                      heuristicsStarted = true;
+                      setLoading(false);
+                      setIsBlockingRecalc(true); // Use blocking for initial pass
+                    }
 
-              for (const sentenceEnd of sentenceEnds) {
-                if (sentenceEnd > lastCompleteSentenceEnd) {
-                  // We have a new complete sentence!
-                  // Switch to heuristic mode if not already
-                  if (!heuristicsStarted) {
-                    heuristicsStarted = true;
-                    setLoading(false);
-                    setIsBlockingRecalc(true); // Use blocking for initial pass
+                    // Find sentence start (after previous separator or beginning)
+                    const sentenceStart = lastCompleteSentenceEnd + 1;
+
+                    // Extract just this sentence
+                    const sentenceWords = words.slice(
+                      sentenceStart,
+                      sentenceEnd + 1,
+                    );
+
+                    // Run heuristics on this complete sentence
+                    // Priority 1: High confidence structural
+                    applySumHeuristic(sentenceWords);
+                    applyInfinitiveHeuristic(sentenceWords);
+                    applyQueEtGuessing(sentenceWords);
+                    
+                    // Priority 2: Prepositions (structural)
+                    applyPrepositionIdentification(sentenceWords);
+                    applyPrepositionInference(sentenceWords);
+                    applyPrepositionalGuessing(sentenceWords);
+                    applyPrepositionalBracketGuessing(sentenceWords);
+                    
+                    // Priority 3: Structural relationships
+                    applyGenitiveHeuristic(sentenceWords);
+                    
+                    // Priority 4: Agreement-based
+                    applyAdjectiveAgreementInference(sentenceWords);
+                    applyAdjectiveNounGuessing(sentenceWords);
+                    applyAdjacentAgreementGuessing(sentenceWords);
+                    applyParticipleBraceHeuristic(sentenceWords);
+                    
+                    // Priority 5: Sentence structure
+                    applyNominativeChunkGuessing(sentenceWords);
+                    applyAppositionHeuristic(sentenceWords);
+                    
+                    // Priority 6: Advanced patterns
+                    applyParticipleModifierHeuristic(sentenceWords);
+                    applyLinkingVerbHeuristic(sentenceWords);
+                    applyComplementaryInfinitiveHeuristic(sentenceWords);
+                    applyVocativeHeuristic(sentenceWords);
+                    applyPurposeClauseHeuristic(sentenceWords);
+                    applyComparativeHeuristic(sentenceWords);
+
+                    lastCompleteSentenceEnd = sentenceEnd;
                   }
-
-                  // Find sentence start (after previous separator or beginning)
-                  const sentenceStart = lastCompleteSentenceEnd + 1;
-
-                  // Extract just this sentence
-                  const sentenceWords = words.slice(
-                    sentenceStart,
-                    sentenceEnd + 1,
-                  );
-
-                  // Run heuristics on this complete sentence
-                  // Priority 1: High confidence structural
-                  applySumHeuristic(sentenceWords);
-                  applyInfinitiveHeuristic(sentenceWords);
-                  applyQueEtGuessing(sentenceWords);
-                  
-                  // Priority 2: Prepositions (structural)
-                  applyPrepositionIdentification(sentenceWords);
-                  applyPrepositionInference(sentenceWords);
-                  applyPrepositionalGuessing(sentenceWords);
-                  applyPrepositionalBracketGuessing(sentenceWords);
-                  
-                  // Priority 3: Structural relationships
-                  applyGenitiveHeuristic(sentenceWords);
-                  
-                  // Priority 4: Agreement-based
-                  applyAdjectiveAgreementInference(sentenceWords);
-                  applyAdjectiveNounGuessing(sentenceWords);
-                  applyAdjacentAgreementGuessing(sentenceWords);
-                  applyParticipleBraceHeuristic(sentenceWords);
-                  
-                  // Priority 5: Sentence structure
-                  applyNominativeChunkGuessing(sentenceWords);
-                  applyAppositionHeuristic(sentenceWords);
-                  
-                  // Priority 6: Advanced patterns
-                  applyParticipleModifierHeuristic(sentenceWords);
-                  applyLinkingVerbHeuristic(sentenceWords);
-                  applyComplementaryInfinitiveHeuristic(sentenceWords);
-                  applyVocativeHeuristic(sentenceWords);
-                  applyPurposeClauseHeuristic(sentenceWords);
-                  applyComparativeHeuristic(sentenceWords);
-
-                  lastCompleteSentenceEnd = sentenceEnd;
                 }
-              }
 
-              // Update UI
-              setAnalyzerWords([...words]);
+                // Update UI (batched)
+                setAnalyzerWords([...words]);
+                pendingUpdates = 0;
+              }
             } catch (e) {
               console.error("Failed to parse chunk:", line, e);
             }
           }
+        }
+
+        // Final update for any remaining results
+        if (pendingUpdates > 0) {
+          setAnalyzerWords([...words]);
         }
 
         // All words loaded - run full heuristics incrementally
@@ -1053,21 +1067,30 @@ export default function Home() {
       heuristic: undefined,
     };
 
-    // Apply incremental heuristics to the whole sentence
+    // Update state immediately with the selection
+    setAnalyzerWords(newWords);
+
+    // Apply incremental heuristics to the whole sentence asynchronously
     setIsLoading(true);
     setTimeout(() => {
-      // Extract sentence
-      const sentenceWords = newWords.slice(sentenceStart, sentenceEnd + 1);
+      // Get fresh state
+      setAnalyzerWords((currentWords) => {
+        const freshWords = [...currentWords];
+        
+        // Extract sentence
+        const sentenceWords = freshWords.slice(sentenceStart, sentenceEnd + 1);
+        
+        // Apply all heuristics to the sentence (mutates in place)
+        applyIncrementalHeuristics(sentenceWords, selectedWordIndex - sentenceStart);
+        
+        // Merge back into a new array
+        for (let i = 0; i < sentenceWords.length; i++) {
+          freshWords[sentenceStart + i] = sentenceWords[i];
+        }
+        
+        return freshWords;
+      });
       
-      // Apply all heuristics to the sentence
-      applyIncrementalHeuristics(sentenceWords, selectedWordIndex - sentenceStart);
-      
-      // Merge back
-      for (let i = 0; i < sentenceWords.length; i++) {
-        newWords[sentenceStart + i] = sentenceWords[i];
-      }
-      
-      setAnalyzerWords(newWords);
       setIsLoading(false);
     }, 10);
 
@@ -2359,15 +2382,54 @@ export default function Home() {
             const revokeGuess = () => {
               // Clear the selection and mark as rejected
               const newWords = [...analyzerWords];
-              const heuristicId = `${newWords[wordIndex].selectedEntry?.type}-${wordIndex}`;
-              if (!newWords[wordIndex].rejectedHeuristics) {
-                newWords[wordIndex].rejectedHeuristics = new Set();
+              const word = newWords[wordIndex];
+              
+              // Build a rejection ID based on the heuristic text
+              // The heuristic text describes what kind of guess it was
+              let heuristicId = '';
+              
+              if (word.heuristic) {
+                // Parse the heuristic text to determine the type
+                const heuristicText = word.heuristic.toLowerCase();
+                
+                if (heuristicText.includes('nominative')) {
+                  heuristicId = 'nominative-guess';
+                } else if (heuristicText.includes('adjective') && heuristicText.includes('case')) {
+                  heuristicId = 'adjective-case-guess';
+                } else if (heuristicText.includes('object of')) {
+                  heuristicId = `prep-object-${wordIndex}`;
+                } else if (heuristicText.includes('subject of')) {
+                  heuristicId = `subject-of-verb-${wordIndex}`;
+                } else if (heuristicText.includes('ablative')) {
+                  // More specific ablative patterns
+                  if (heuristicText.includes('means')) {
+                    heuristicId = `abl-means-${wordIndex}`;
+                  } else if (heuristicText.includes('agent')) {
+                    heuristicId = `abl-agent-${wordIndex}`;
+                  } else {
+                    heuristicId = `ablative-${wordIndex}`;
+                  }
+                } else {
+                  // Generic fallback
+                  heuristicId = `word-guess-${wordIndex}`;
+                }
+              } else {
+                // No heuristic text, use generic ID
+                heuristicId = `word-guess-${wordIndex}`;
               }
-              newWords[wordIndex].rejectedHeuristics!.add(heuristicId);
-              newWords[wordIndex].selectedEntry = undefined;
-              newWords[wordIndex].selectedMorphology = undefined;
-              newWords[wordIndex].guessed = false;
-              newWords[wordIndex].heuristic = undefined;
+              
+              // Add to rejected heuristics
+              if (!word.rejectedHeuristics) {
+                word.rejectedHeuristics = new Set();
+              }
+              word.rejectedHeuristics.add(heuristicId);
+              
+              // Clear the selection
+              word.selectedEntry = undefined;
+              word.selectedMorphology = undefined;
+              word.guessed = false;
+              word.heuristic = undefined;
+              
               setAnalyzerWords(newWords);
               setGuessConfirmation(null);
             };
@@ -2445,6 +2507,27 @@ export default function Home() {
             const revokeGuess = () => {
               const newWords = [...analyzerWords];
               if (annotationIndex !== undefined) {
+                const annotation = newWords[wordIndex].annotations[annotationIndex];
+                
+                // Build heuristic ID based on annotation type
+                let heuristicId = '';
+                if (annotation.type === 'modify' && annotation.targetIndex !== undefined) {
+                  heuristicId = `modify-${annotation.targetIndex}`;
+                } else if (annotation.type === 'possession' && annotation.targetIndex !== undefined) {
+                  heuristicId = `possession-${annotation.targetIndex}`;
+                } else if (annotation.type === 'preposition-scope' && annotation.endIndex !== undefined) {
+                  heuristicId = `preposition-scope-${annotation.endIndex}`;
+                }
+                
+                // Add to rejected heuristics if we have an ID
+                if (heuristicId) {
+                  if (!newWords[wordIndex].rejectedHeuristics) {
+                    newWords[wordIndex].rejectedHeuristics = new Set();
+                  }
+                  newWords[wordIndex].rejectedHeuristics!.add(heuristicId);
+                }
+                
+                // Remove the annotation
                 newWords[wordIndex].annotations.splice(annotationIndex, 1);
               }
               setAnalyzerWords(newWords);
