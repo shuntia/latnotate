@@ -831,12 +831,17 @@ export default function Home() {
     });
   };
 
-  const rerunHeuristicsInRange = (startIndex: number, endIndex: number) => {
-    if (analyzerWords.length === 0) return;
+  const rerunHeuristicsInRange = (
+    startIndex: number,
+    endIndex: number,
+    baseWords?: SentenceWord[],
+  ) => {
+    const sourceWords = baseWords ?? analyzerWords;
+    if (sourceWords.length === 0) return;
 
     setIsLoading(true);
     setTimeout(() => {
-      const newWords = [...analyzerWords];
+      const newWords = [...sourceWords];
 
       // Clear only guessed selections/annotations in the range
       for (let i = startIndex; i <= endIndex; i++) {
@@ -1022,6 +1027,45 @@ export default function Home() {
     event.target.value = '';
   };
 
+  const getSentenceBounds = (
+    wordIndex: number,
+    words: SentenceWord[],
+  ): [number, number] => {
+    let start = 0;
+    let end = words.length - 1;
+
+    const isSeparator = (word: SentenceWord): boolean => {
+      const cleaned = word.original.trim();
+      return (
+        cleaned === "." ||
+        cleaned === "!" ||
+        cleaned === "?" ||
+        cleaned === ";" ||
+        cleaned === ":" ||
+        word.original === '"' ||
+        word.original === "'" ||
+        word.original === "«" ||
+        word.original === "»"
+      );
+    };
+
+    for (let i = wordIndex - 1; i >= 0; i--) {
+      if (isSeparator(words[i])) {
+        start = i + 1;
+        break;
+      }
+    }
+
+    for (let i = wordIndex + 1; i < words.length; i++) {
+      if (isSeparator(words[i])) {
+        end = i - 1;
+        break;
+      }
+    }
+
+    return [start, end];
+  };
+
   const selectDefinition = (entry: WordEntry, morphology?: string) => {
     if (selectedWordIndex === null) return;
     
@@ -1038,41 +1082,11 @@ export default function Home() {
     }
     
     const newWords = [...analyzerWords];
-
-    // Find sentence boundaries for this word
-    const findSentenceBounds = (wordIndex: number): [number, number] => {
-      let start = 0;
-      let end = newWords.length - 1;
-      
-      // Helper to check if word is a sentence separator
-      const isSeparator = (word: SentenceWord): boolean => {
-        const cleaned = word.original.trim();
-        return cleaned === "." || cleaned === "!" || cleaned === "?" ||
-               cleaned === ";" || cleaned === ":" ||
-               word.original === '"' || word.original === "'" ||
-               word.original === "«" || word.original === "»";
-      };
-      
-      // Find start (go backward to find previous separator)
-      for (let i = wordIndex - 1; i >= 0; i--) {
-        if (isSeparator(newWords[i])) {
-          start = i + 1;
-          break;
-        }
-      }
-      
-      // Find end (go forward to find next separator)
-      for (let i = wordIndex + 1; i < newWords.length; i++) {
-        if (isSeparator(newWords[i])) {
-          end = i - 1;
-          break;
-        }
-      }
-      
-      return [start, end];
-    };
     
-    const [sentenceStart, sentenceEnd] = findSentenceBounds(selectedWordIndex);
+    const [sentenceStart, sentenceEnd] = getSentenceBounds(
+      selectedWordIndex,
+      newWords,
+    );
     
     // Clear all heuristic annotations and selections in the sentence
     for (let i = sentenceStart; i <= sentenceEnd; i++) {
@@ -2487,6 +2501,12 @@ export default function Home() {
               }
               setAnalyzerWords(newWords);
               setGuessConfirmation(null);
+
+              const [sentenceStart, sentenceEnd] = getSentenceBounds(
+                wordIndex,
+                newWords,
+              );
+              rerunHeuristicsInRange(sentenceStart, sentenceEnd, newWords);
             };
 
             const revokeGuess = () => {
