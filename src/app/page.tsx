@@ -678,12 +678,13 @@ export default function Home() {
     }
   };
 
-  const rerunAllHeuristics = () => {
-    if (analyzerWords.length === 0) return;
+  const rerunAllHeuristics = (baseWords?: SentenceWord[]) => {
+    const sourceWords = baseWords ?? analyzerWords;
+    if (sourceWords.length === 0) return;
 
     setIsLoading(true);
     setTimeout(() => {
-      const newWords = [...analyzerWords];
+      const newWords = [...sourceWords];
 
       // DO NOT clear guessed selections/annotations
       // Treat them as "correct" and use them as constraints
@@ -2501,12 +2502,7 @@ export default function Home() {
               }
               setAnalyzerWords(newWords);
               setGuessConfirmation(null);
-
-              const [sentenceStart, sentenceEnd] = getSentenceBounds(
-                wordIndex,
-                newWords,
-              );
-              rerunHeuristicsInRange(sentenceStart, sentenceEnd, newWords);
+              rerunAllHeuristics(newWords);
             };
 
             const revokeGuess = () => {
