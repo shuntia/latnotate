@@ -1072,12 +1072,14 @@ export default function Home() {
     
     const selectedWord = analyzerWords[selectedWordIndex];
     
-    // Check if selection actually changed
-    if (
-      selectedWord.selectedEntry === entry &&
-      selectedWord.selectedMorphology === morphology
-    ) {
-      // No change, just close the dialog
+    // Determine if selection actually changed using stable identifiers (dictLine + morphology)
+    const isSameEntry =
+      selectedWord.selectedEntry &&
+      selectedWord.selectedEntry.dictLine === entry.dictLine &&
+      selectedWord.selectedMorphology === morphology;
+
+    if (isSameEntry) {
+      // No change; close selection dialog for clarity
       setSelectedWordIndex(null);
       return;
     }
@@ -1089,26 +1091,28 @@ export default function Home() {
       newWords,
     );
     
-    // Clear all heuristic annotations and selections in the sentence
-    for (let i = sentenceStart; i <= sentenceEnd; i++) {
-      // Remove heuristic annotations
+    // Only clear heuristics locally near the changed word to avoid wiping unrelated inferences.
+    const clearRadius = 4;
+    const clearStart = Math.max(sentenceStart, selectedWordIndex - clearRadius);
+    const clearEnd = Math.min(sentenceEnd, selectedWordIndex + clearRadius);
+
+    for (let i = clearStart; i <= clearEnd; i++) {
+      // Remove annotations created by heuristics (those with 'heuristic' flag)
       newWords[i].annotations = newWords[i].annotations.filter((ann) => !ann.heuristic);
-      
-      // Clear heuristic word selections (keep manual selections)
-      if (newWords[i].guessed || newWords[i].heuristic) {
+
+      // Clear only guessed word selections (keep manual selections)
+      if (newWords[i].guessed) {
         newWords[i].selectedEntry = undefined;
         newWords[i].selectedMorphology = undefined;
         newWords[i].guessed = false;
         newWords[i].heuristic = undefined;
       }
-      
-      // Clear heuristic et prefixes
+
+      // Clear guessed et prefixes and adjacent guesses
       if (newWords[i].etGuessed) {
         newWords[i].hasEtPrefix = false;
         newWords[i].etGuessed = false;
       }
-      
-      // Clear heuristic adjacent connections
       if (newWords[i].adjacentGuessed) {
         newWords[i].hasAdjacentConnection = false;
         newWords[i].adjacentGuessed = false;
@@ -1127,29 +1131,32 @@ export default function Home() {
     // Update state immediately with the selection
     setAnalyzerWords(newWords);
 
-    // Apply incremental heuristics to the whole sentence asynchronously
+    // Apply incremental heuristics asynchronously for the local window
     setIsLoading(true);
     setTimeout(() => {
-      // Get fresh state
       setAnalyzerWords((currentWords) => {
         const freshWords = [...currentWords];
-        
-        // Extract sentence
-        const sentenceWords = freshWords.slice(sentenceStart, sentenceEnd + 1);
-        
-        // Apply all heuristics to the sentence (mutates in place)
-        applyIncrementalHeuristics(sentenceWords, selectedWordIndex - sentenceStart);
-        
-        // Merge back into a new array
-        for (let i = 0; i < sentenceWords.length; i++) {
-          freshWords[sentenceStart + i] = sentenceWords[i];
+
+        const sliceStart = Math.max(sentenceStart, selectedWordIndex - clearRadius);
+        const sliceEnd = Math.min(sentenceEnd, selectedWordIndex + clearRadius);
+        const slice = freshWords.slice(sliceStart, sliceEnd + 1);
+
+        // Apply incremental heuristics to the local slice (mutates in place)
+        applyIncrementalHeuristics(slice, selectedWordIndex - sliceStart);
+
+        // Merge the slice back
+        for (let i = 0; i < slice.length; i++) {
+          freshWords[sliceStart + i] = slice[i];
         }
-        
+
         return freshWords;
       });
-      
+
       setIsLoading(false);
     }, 10);
+
+    // Close the selection dialog to reduce confusion (selection remains highlighted)
+    setSelectedWordIndex(null);
 
     // Keep the word selected so user can see their selection
   };
