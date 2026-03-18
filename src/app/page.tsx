@@ -37,9 +37,9 @@ import {
 } from "@/lib/types/sentence";
 import { TAG_CONFIG, POS_FULL_NAMES } from "@/lib/constants/tags";
 import { getTagFromWord, sortMorphologies } from "@/lib/utils/morphology";
+import { getFrequencyScore, getFrequencyColor } from "@/lib/frequency";
 import { cleanWord } from "@/lib/utils/word-helpers";
 import {
-  applyNominativeChunkGuessing,
   applyAdjectiveNounGuessing,
   applyPrepositionalBracketGuessing,
   applyPrepositionalGuessing,
@@ -570,7 +570,6 @@ export default function Home() {
                     applyParticipleBraceHeuristic(sentenceWords);
                     
                     // Priority 5: Sentence structure
-                    applyNominativeChunkGuessing(sentenceWords);
                     applyAppositionHeuristic(sentenceWords);
                     
                     // Priority 6: Advanced patterns
@@ -635,7 +634,6 @@ export default function Home() {
         await applyAndUpdate(applyParticipleBraceHeuristic);
         
         // Priority 5: Sentence structure
-        await applyAndUpdate(applyNominativeChunkGuessing);
         await applyAndUpdate(applyAppositionHeuristic);
         
         // Priority 6: Advanced patterns
@@ -684,14 +682,13 @@ export default function Home() {
 
     setIsLoading(true);
     setTimeout(() => {
-      const newWords = [...sourceWords];
-
-      // DO NOT clear guessed selections/annotations
-      // Treat them as "correct" and use them as constraints
-      // Only clear rejected heuristics so they can be re-attempted
-      newWords.forEach((word) => {
-        word.rejectedHeuristics?.clear();
-      });
+      // Deep clone to avoid mutating state
+      const newWords = sourceWords.map(w => ({
+        ...w,
+        annotations: [...w.annotations],
+        rejectedHeuristics: w.rejectedHeuristics ? new Set(w.rejectedHeuristics) : undefined,
+        dependentWords: w.dependentWords ? new Set(w.dependentWords) : undefined
+      }));
 
       // Rerun all heuristics (they will respect existing selections)
       // Priority 1: High confidence structural
@@ -715,7 +712,6 @@ export default function Home() {
       applyParticipleBraceHeuristic(newWords);
       
       // Priority 5: Sentence structure
-      applyNominativeChunkGuessing(newWords);
       applyAppositionHeuristic(newWords);
       
       // Priority 6: Advanced patterns
@@ -742,7 +738,12 @@ export default function Home() {
 
     setIsBlockingRecalc(true);
     
-    const newWords = [...analyzerWords];
+    const newWords = analyzerWords.map(w => ({
+      ...w,
+      annotations: [...w.annotations],
+      rejectedHeuristics: w.rejectedHeuristics ? new Set(w.rejectedHeuristics) : undefined,
+      dependentWords: w.dependentWords ? new Set(w.dependentWords) : undefined
+    }));
 
     // Clear ALL heuristic inferences (but keep manual selections)
     newWords.forEach((word) => {
@@ -781,7 +782,13 @@ export default function Home() {
     // Helper to apply heuristics and update UI
     const applyAndUpdate = async (applyFn: (words: SentenceWord[]) => void) => {
       applyFn(newWords);
-      setAnalyzerWords([...newWords]);
+      // Push a deep clone to state so React sees new object references
+      setAnalyzerWords(newWords.map(w => ({ 
+        ...w, 
+        annotations: [...w.annotations],
+        rejectedHeuristics: w.rejectedHeuristics ? new Set(w.rejectedHeuristics) : undefined,
+        dependentWords: w.dependentWords ? new Set(w.dependentWords) : undefined
+      })));
       await new Promise(resolve => setTimeout(resolve, 50)); // Small delay for visual feedback
     };
 
@@ -807,7 +814,6 @@ export default function Home() {
     await applyAndUpdate(applyParticipleBraceHeuristic);
     
     // Priority 5: Sentence structure
-    await applyAndUpdate(applyNominativeChunkGuessing);
     await applyAndUpdate(applyAppositionHeuristic);
     
     // Priority 6: Advanced patterns
@@ -846,11 +852,19 @@ export default function Home() {
 
       // Clear only guessed selections/annotations in the range
       for (let i = startIndex; i <= endIndex; i++) {
-        const word = newWords[i];
+        // Deep clone the word to avoid mutating state
+        const word = { 
+          ...newWords[i],
+          annotations: [...newWords[i].annotations],
+          rejectedHeuristics: newWords[i].rejectedHeuristics ? new Set(newWords[i].rejectedHeuristics) : undefined,
+          dependentWords: newWords[i].dependentWords ? new Set(newWords[i].dependentWords) : undefined
+        };
+        newWords[i] = word;
+        
         if (!word) continue;
 
-        // Remove guessed annotations
-        word.annotations = word.annotations.filter((ann) => !ann.guessed);
+        // Remove heuristic annotations (those with 'heuristic' property or 'guessed' flag)
+        word.annotations = word.annotations.filter((ann) => !ann.guessed && !ann.heuristic);
 
         // Clear guessed word selections
         if (word.guessed) {
@@ -866,56 +880,49 @@ export default function Home() {
           word.etGuessed = false;
         }
 
-        // Clear rejected heuristics in range
-        word.rejectedHeuristics?.clear();
+        // Do NOT clear rejected heuristics in range - user rejections should persist
+        // word.rejectedHeuristics?.clear();
       }
 
-      // Extract the range as a slice for heuristic processing
-      const rangeWords = newWords.slice(startIndex, endIndex + 1);
-
-      // Run heuristics on the range
+      // Run heuristics on the FULL sentence to ensure context is available
+      // Words outside the cleared range will be skipped by heuristics because they have selectedEntry
+      
       // Priority 1: High confidence structural
-      applySumHeuristic(rangeWords);
-      applyInfinitiveHeuristic(rangeWords);
-      applyQueEtGuessing(rangeWords);
+      applySumHeuristic(newWords);
+      applyInfinitiveHeuristic(newWords);
+      applyQueEtGuessing(newWords);
       
       // Priority 2: Prepositions (structural)
-      applyPrepositionIdentification(rangeWords);
-      applyPrepositionInference(rangeWords);
-      applyPrepositionalGuessing(rangeWords);
-      applyPrepositionalBracketGuessing(rangeWords);
+      applyPrepositionIdentification(newWords);
+      applyPrepositionInference(newWords);
+      applyPrepositionalGuessing(newWords);
+      applyPrepositionalBracketGuessing(newWords);
       
       // Priority 3: Structural relationships
-      applyGenitiveHeuristic(rangeWords);
+      applyGenitiveHeuristic(newWords);
       
       // Priority 4: Agreement-based
-      applyAdjectiveAgreementInference(rangeWords);
-      applyAdjectiveNounGuessing(rangeWords);
-      applyAdjacentAgreementGuessing(rangeWords);
-      applyParticipleBraceHeuristic(rangeWords);
+      applyAdjectiveAgreementInference(newWords);
+      applyAdjectiveNounGuessing(newWords);
+      applyAdjacentAgreementGuessing(newWords);
+      applyParticipleBraceHeuristic(newWords);
       
       // Priority 5: Sentence structure
-      applyNominativeChunkGuessing(rangeWords);
-      applyAppositionHeuristic(rangeWords);
+      applyAppositionHeuristic(newWords);
       
       // Priority 6: Advanced patterns
-      applyRelativePronounHeuristic(rangeWords);
-      applyDativeIndirectObjectHeuristic(rangeWords);
-      applyAccusativeInfinitiveHeuristic(rangeWords);
-      applyComparativeHeuristic(rangeWords);
-      applyAblativeMeansHeuristic(rangeWords);
-      applyAblativeAgentHeuristic(rangeWords);
-      applyAblativeAbsoluteHeuristic(rangeWords);
-      applyParticipleModifierHeuristic(rangeWords);
-      applyLinkingVerbHeuristic(rangeWords);
-      applyComplementaryInfinitiveHeuristic(rangeWords);
-      applyVocativeHeuristic(rangeWords);
-      applyPurposeClauseHeuristic(rangeWords);
-
-      // Put the processed range back into the main array
-      for (let i = 0; i < rangeWords.length; i++) {
-        newWords[startIndex + i] = rangeWords[i];
-      }
+      applyRelativePronounHeuristic(newWords);
+      applyDativeIndirectObjectHeuristic(newWords);
+      applyAccusativeInfinitiveHeuristic(newWords);
+      applyComparativeHeuristic(newWords);
+      applyAblativeMeansHeuristic(newWords);
+      applyAblativeAgentHeuristic(newWords);
+      applyAblativeAbsoluteHeuristic(newWords);
+      applyParticipleModifierHeuristic(newWords);
+      applyLinkingVerbHeuristic(newWords);
+      applyComplementaryInfinitiveHeuristic(newWords);
+      applyVocativeHeuristic(newWords);
+      applyPurposeClauseHeuristic(newWords);
 
       setAnalyzerWords(newWords);
       setIsLoading(false);
@@ -1086,79 +1093,36 @@ export default function Home() {
     
     const newWords = [...analyzerWords];
     
-    const [sentenceStart, sentenceEnd] = getSentenceBounds(
-      selectedWordIndex,
-      newWords,
-    );
-    
-    // Only clear heuristics locally near the changed word to avoid wiping unrelated inferences.
-    const clearRadius = 4;
-    const clearStart = Math.max(sentenceStart, selectedWordIndex - clearRadius);
-    const clearEnd = Math.min(sentenceEnd, selectedWordIndex + clearRadius);
-
-    for (let i = clearStart; i <= clearEnd; i++) {
-      // Remove annotations created by heuristics (those with 'heuristic' flag)
-      newWords[i].annotations = newWords[i].annotations.filter((ann) => !ann.heuristic);
-
-      // Clear only guessed word selections (keep manual selections)
-      if (newWords[i].guessed) {
-        newWords[i].selectedEntry = undefined;
-        newWords[i].selectedMorphology = undefined;
-        newWords[i].guessed = false;
-        newWords[i].heuristic = undefined;
-      }
-
-      // Clear guessed et prefixes and adjacent guesses
-      if (newWords[i].etGuessed) {
-        newWords[i].hasEtPrefix = false;
-        newWords[i].etGuessed = false;
-      }
-      if (newWords[i].adjacentGuessed) {
-        newWords[i].hasAdjacentConnection = false;
-        newWords[i].adjacentGuessed = false;
-      }
-    }
-
-    // Apply the new selection
+    // Apply the new selection (manual)
     newWords[selectedWordIndex] = {
       ...newWords[selectedWordIndex],
       selectedEntry: entry,
       selectedMorphology: morphology,
       guessed: false,
       heuristic: undefined,
+      // Clear annotations on this word? Let rerunHeuristicsInRange handle clearing stale annotations.
+      // But we must preserve MANUAL annotations.
+      // rerunHeuristicsInRange clears !ann.guessed && !ann.heuristic.
+      // Manual annotations should not have 'heuristic' or 'guessed'.
+      // So they are preserved.
     };
+    
+    const [sentenceStart, sentenceEnd] = getSentenceBounds(
+      selectedWordIndex,
+      newWords,
+    );
+    
+    // Only clear/re-run heuristics locally near the changed word
+    const clearRadius = 4;
+    const clearStart = Math.max(sentenceStart, selectedWordIndex - clearRadius);
+    const clearEnd = Math.min(sentenceEnd, selectedWordIndex + clearRadius);
 
-    // Update state immediately with the selection
-    setAnalyzerWords(newWords);
+    // Use rerunHeuristicsInRange to handle dependencies and re-run all heuristics
+    // Passing newWords ensures it sees the manual change we just made
+    rerunHeuristicsInRange(clearStart, clearEnd, newWords);
 
-    // Apply incremental heuristics asynchronously for the local window
-    setIsLoading(true);
-    setTimeout(() => {
-      setAnalyzerWords((currentWords) => {
-        const freshWords = [...currentWords];
-
-        const sliceStart = Math.max(sentenceStart, selectedWordIndex - clearRadius);
-        const sliceEnd = Math.min(sentenceEnd, selectedWordIndex + clearRadius);
-        const slice = freshWords.slice(sliceStart, sliceEnd + 1);
-
-        // Apply incremental heuristics to the local slice (mutates in place)
-        applyIncrementalHeuristics(slice, selectedWordIndex - sliceStart);
-
-        // Merge the slice back
-        for (let i = 0; i < slice.length; i++) {
-          freshWords[sliceStart + i] = slice[i];
-        }
-
-        return freshWords;
-      });
-
-      setIsLoading(false);
-    }, 10);
-
-    // Close the selection dialog to reduce confusion (selection remains highlighted)
+    // Close the selection dialog
     setSelectedWordIndex(null);
-
-    // Keep the word selected so user can see their selection
   };
 
   const handleRightClick = (e: React.MouseEvent, index: number) => {
@@ -1180,7 +1144,13 @@ export default function Home() {
     if (interactionMode) {
       // Complete annotation
       const newWords = [...analyzerWords];
-      const sourceWord = newWords[interactionMode.sourceIndex];
+      // Create a shallow copy of the source word to avoid mutating state directly
+      const sourceWordIndex = interactionMode.sourceIndex;
+      const sourceWord = { ...newWords[sourceWordIndex] };
+      // Also copy annotations array
+      sourceWord.annotations = [...sourceWord.annotations];
+      
+      newWords[sourceWordIndex] = sourceWord;
 
       // Remove existing annotation of same type if exists? No, support multiple.
 
@@ -1961,7 +1931,7 @@ export default function Home() {
                 </CardContent>
                 <CardContent className="pt-0 space-y-2">
                   <Button
-                    onClick={rerunAllHeuristics}
+                    onClick={() => rerunAllHeuristics()}
                     disabled={isLoading || isBlockingRecalc}
                     variant="outline"
                     className="w-full"
@@ -1970,7 +1940,7 @@ export default function Home() {
                     {isLoading || isBlockingRecalc ? "Processing..." : "Rerun All Heuristics"}
                   </Button>
                   <Button
-                    onClick={reAnalyzeAllHeuristics}
+                    onClick={() => reAnalyzeAllHeuristics()}
                     disabled={isLoading || isBlockingRecalc}
                     variant="destructive"
                     className="w-full"
@@ -2042,6 +2012,11 @@ export default function Home() {
                           if (aIsGuessed && !bIsGuessed) return -1;
                           if (!aIsGuessed && bIsGuessed) return 1;
                           
+                          // Then frequency
+                          const freqA = getFrequencyScore(a.frequency);
+                          const freqB = getFrequencyScore(b.frequency);
+                          if (freqA !== freqB) return freqA - freqB;
+
                           return 0;
                         })
                         .map((entry, i) => {
@@ -2051,7 +2026,14 @@ export default function Home() {
                           return (
                             <div
                               key={i}
-                              className={`border rounded-lg p-3 transition-all ${
+                              onClick={() => {
+                                if (entry.morphologies.length === 1) {
+                                  selectDefinition(entry, entry.morphologies[0].analysis);
+                                } else {
+                                  selectDefinition(entry);
+                                }
+                              }}
+                              className={`border rounded-lg p-3 transition-all cursor-pointer ${
                                 isSelected
                                   ? "ring-2 ring-indigo-500 bg-indigo-50"
                                   : isFocused
@@ -2068,6 +2050,14 @@ export default function Home() {
                                     <Badge variant="secondary" className="text-xs">
                                       {entry.type}
                                     </Badge>
+                                    {entry.frequency && (
+                                      <Badge 
+                                        variant="outline" 
+                                        className={`text-[10px] px-1.5 py-0 h-5 ${getFrequencyColor(entry.frequency)}`}
+                                      >
+                                        {entry.frequency}
+                                      </Badge>
+                                    )}
                                     {entry.dictionaryCode && (
                                       <span className="text-xs font-mono text-gray-400">
                                         {entry.dictionaryCode}
@@ -2278,6 +2268,11 @@ export default function Home() {
                       if (aIsGuessed && !bIsGuessed) return -1;
                       if (!aIsGuessed && bIsGuessed) return 1;
                       
+                      // Then frequency
+                      const freqA = getFrequencyScore(a.frequency);
+                      const freqB = getFrequencyScore(b.frequency);
+                      if (freqA !== freqB) return freqA - freqB;
+                      
                       return 0;
                     })
                     .map((entry, i) => {
@@ -2287,7 +2282,14 @@ export default function Home() {
                       return (
                         <div
                           key={i}
-                          className={`border rounded-lg p-3 transition-all ${
+                          onClick={() => {
+                            if (entry.morphologies.length === 1) {
+                              selectDefinition(entry, entry.morphologies[0].analysis);
+                            } else {
+                              selectDefinition(entry);
+                            }
+                          }}
+                          className={`border rounded-lg p-3 transition-all cursor-pointer ${
                             isSelected
                               ? "ring-2 ring-indigo-500 bg-indigo-50"
                               : isFocused
@@ -2304,6 +2306,14 @@ export default function Home() {
                                 <Badge variant="secondary" className="text-xs">
                                   {entry.type}
                                 </Badge>
+                                {entry.frequency && (
+                                  <Badge 
+                                    variant="outline" 
+                                    className={`text-[10px] px-1.5 py-0 h-5 ${getFrequencyColor(entry.frequency)}`}
+                                  >
+                                    {entry.frequency}
+                                  </Badge>
+                                )}
                                 {entry.dictionaryCode && (
                                   <span className="text-xs font-mono text-gray-400">
                                     {entry.dictionaryCode}
@@ -2428,6 +2438,8 @@ export default function Home() {
               // Add to rejected heuristics
               if (!word.rejectedHeuristics) {
                 word.rejectedHeuristics = new Set();
+              } else {
+                word.rejectedHeuristics = new Set(word.rejectedHeuristics);
               }
               word.rejectedHeuristics.add(heuristicId);
               
@@ -2436,6 +2448,8 @@ export default function Home() {
               word.selectedMorphology = undefined;
               word.guessed = false;
               word.heuristic = undefined;
+
+              newWords[wordIndex] = word;
               
               setAnalyzerWords(newWords);
               setGuessConfirmation(null);
@@ -2528,15 +2542,23 @@ export default function Home() {
                 }
                 
                 // Add to rejected heuristics if we have an ID
+                const word = { ...newWords[wordIndex] };
+                if (word.rejectedHeuristics) {
+                  word.rejectedHeuristics = new Set(word.rejectedHeuristics);
+                } else {
+                  word.rejectedHeuristics = new Set();
+                }
+
                 if (heuristicId) {
-                  if (!newWords[wordIndex].rejectedHeuristics) {
-                    newWords[wordIndex].rejectedHeuristics = new Set();
-                  }
-                  newWords[wordIndex].rejectedHeuristics!.add(heuristicId);
+                  word.rejectedHeuristics.add(heuristicId);
                 }
                 
+                // Clone annotations before modifying
+                word.annotations = [...word.annotations];
                 // Remove the annotation
-                newWords[wordIndex].annotations.splice(annotationIndex, 1);
+                word.annotations.splice(annotationIndex, 1);
+                
+                newWords[wordIndex] = word;
               }
               setAnalyzerWords(newWords);
               setGuessConfirmation(null);

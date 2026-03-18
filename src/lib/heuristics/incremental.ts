@@ -20,10 +20,6 @@ export const applyIncrementalHeuristics = (
   const changedWord = words[changedIndex];
   if (!changedWord.selectedEntry || !changedWord.selectedMorphology) return;
 
-  // Expand range to include 5 words before and after (with bounds checking)
-  const expandedStart = Math.max(0, changedIndex - 5);
-  const expandedEnd = Math.min(words.length - 1, changedIndex + 5);
-
   // 1. If this word is a preposition, try to guess its object
   const isPrep =
     changedWord.selectedEntry.type === "Other" &&
@@ -271,40 +267,8 @@ export const applyIncrementalHeuristics = (
     }
   }
 
-  // 3. If this word is a 3rd person verb, try to find nominative subject
-  if (changedWord.selectedEntry.type === "Verb") {
-    const verbInfo = getVerbPersonNumber(changedWord.selectedMorphology);
-    if (verbInfo && verbInfo.person === 3) {
-      // Look backwards for matching nominative
-      for (let i = changedIndex - 1; i >= 0; i--) {
-        const candidate = words[i];
-        if (candidate.selectedEntry) continue;
+  // 3. (Removed Nominative Subject Guessing)
 
-        const entries = candidate.lookupResults || [];
-        for (const entry of entries) {
-          if (entry.type !== "Noun") continue;
-
-          const nomMorphs = entry.morphologies.filter((m) => {
-            const isNom = isNominative(m.analysis);
-            const num = getGrammaticalNumber(m.analysis);
-            return isNom && num === verbInfo.number;
-          });
-
-          if (nomMorphs.length === 1) {
-            candidate.selectedEntry = entry;
-            candidate.selectedMorphology = nomMorphs[0].analysis;
-            candidate.heuristic = `Subject of "${changedWord.original}" (${verbInfo.number === "S" ? "singular" : "plural"})`;
-            return;
-          } else if (nomMorphs.length > 1) {
-            candidate.selectedEntry = entry;
-            candidate.selectedMorphology = nomMorphs[0].analysis;
-            candidate.heuristic = `Subject of "${changedWord.original}" (${verbInfo.number === "S" ? "singular" : "plural"})`;
-            return;
-          }
-        }
-      }
-    }
-  }
 
   // 4. Check adjacent words for agreement
   const checkAdjacentAgreement = (idx1: number, idx2: number) => {
@@ -347,22 +311,19 @@ export const applyIncrementalHeuristics = (
     checkAdjacentAgreement(changedIndex - 1, changedIndex);
   }
 
-  // 5. Apply relationship heuristics to expanded range (±5 words)
-  const expandedSlice = words.slice(expandedStart, expandedEnd + 1);
+  // 5. Apply relationship heuristics
+  
+  // Use FULL sentence to ensure indices in annotations are correct
+  // Slicing causes indices to be relative to the slice, which breaks targetIndex
   
   // Apply genitive heuristic
-  applyGenitiveHeuristic(expandedSlice);
+  applyGenitiveHeuristic(words);
   
   // Apply adjacent agreement
-  applyAdjacentAgreementGuessing(expandedSlice);
+  applyAdjacentAgreementGuessing(words);
   
   // Apply adjective-noun guessing
-  applyAdjectiveNounGuessing(expandedSlice);
-  
-  // Put the processed slice back into the main array
-  for (let i = 0; i < expandedSlice.length; i++) {
-    words[expandedStart + i] = expandedSlice[i];
-  }
+  applyAdjectiveNounGuessing(words);
 };
 
 export const rerunDependentHeuristics = (

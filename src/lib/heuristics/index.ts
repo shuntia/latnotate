@@ -1,54 +1,23 @@
 // Re-export all heuristic functions
-export { applyNominativeChunkGuessing } from "./nominative";
-export { applyAdjectiveNounGuessing } from "./adjective";
-export { applyAdjectiveCaseGuessing } from "./adjective-case";
-export {
-  applyPrepositionalBracketGuessing,
-  applyReversePrepositionalBracketGuessing,
-  applyPrepositionalGuessing,
-  applyPrepositionIdentification,
-  applyPrepositionInference,
-} from "./preposition";
-export { applyGenitiveHeuristic } from "./genitive";
-export { applyAdjacentAgreementGuessing } from "./adjacent";
-export { applyQueEtGuessing } from "./que";
-export {
-  applyIncrementalHeuristics,
-  rerunDependentHeuristics,
-} from "./incremental";
-
-// New heuristics (first batch)
-export { applyRelativePronounHeuristic } from "./relative-pronoun";
-export { applyDativeIndirectObjectHeuristic } from "./dative";
-export { applyAppositionHeuristic } from "./apposition";
-export { applyAccusativeInfinitiveHeuristic } from "./accusative-infinitive";
-export {
-  applyComparativeHeuristic,
-} from "./clauses";
-export {
-  applyAblativeMeansHeuristic,
-  applyAblativeAgentHeuristic,
-  applyAblativeAbsoluteHeuristic,
-} from "./ablative";
-
-// New heuristics (second batch)
-export { applyParticipleModifierHeuristic } from "./participle";
-export { applyLinkingVerbHeuristic } from "./linking-verb";
-export { applyComplementaryInfinitiveHeuristic } from "./complementary-infinitive";
-export { applyVocativeHeuristic } from "./vocative";
-export { applyPurposeClauseHeuristic } from "./purpose-clause";
-
-// New heuristics (third batch - improvements)
-export { applySumHeuristic } from "./sum";
-export { applyAdjectiveAgreementInference } from "./adjective-agreement-inference";
-export { applyParticipleBraceHeuristic } from "./participle-brace";
-export { applyInfinitiveHeuristic } from "./infinitive";
-
-// Heuristic invalidation
-export {
-  detectChanges,
-  getInvalidatedHeuristics,
-  undoHeuristicsForWord,
-  undoDependentHeuristics,
-} from "./invalidation";
-export type { HeuristicType, HeuristicMetadata } from "./invalidation";
+export * from "./ablative";
+export * from "./accusative-infinitive";
+export * from "./adjacent";
+export * from "./adjective-agreement-inference";
+export * from "./adjective-case";
+export * from "./adjective";
+export * from "./apposition";
+export * from "./clauses";
+export * from "./complementary-infinitive";
+export * from "./dative";
+export * from "./genitive";
+export * from "./incremental";
+export * from "./infinitive";
+export * from "./linking-verb";
+export * from "./participle-brace";
+export * from "./participle";
+export * from "./preposition";
+export * from "./purpose-clause";
+export * from "./que";
+export * from "./relative-pronoun";
+export * from "./sum";
+export * from "./vocative";

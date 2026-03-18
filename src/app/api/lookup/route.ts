@@ -512,7 +512,7 @@ export async function POST(req: NextRequest) {
               );
               // Remove accent marks before lookup
               const cleanedWord = removeAccents(word);
-              fs.writeFileSync(tempFile, cleanedWord);
+              await fs.promises.writeFile(tempFile, cleanedWord);
 
               try {
                 const { stdout } = await execFileAsync(binPath, [tempFile], {
@@ -533,7 +533,7 @@ export async function POST(req: NextRequest) {
                 return { word, entries: [] };
               } finally {
                 try {
-                  fs.unlinkSync(tempFile);
+                  await fs.promises.unlink(tempFile);
                 } catch {
                   /* ignore */
                 }
@@ -577,7 +577,7 @@ export async function POST(req: NextRequest) {
         );
         // Remove accent marks before lookup
         const cleanedWord = removeAccents(word);
-        fs.writeFileSync(tempFile, cleanedWord);
+        await fs.promises.writeFile(tempFile, cleanedWord);
 
         try {
           const { stdout } = await execFileAsync(binPath, [tempFile], {
@@ -598,7 +598,7 @@ export async function POST(req: NextRequest) {
           return { word, entries: [] };
         } finally {
           try {
-            fs.unlinkSync(tempFile);
+            await fs.promises.unlink(tempFile);
           } catch {
             /* ignore */
           }
