@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Home, BookOpen, FileText } from "lucide-react";
+import { Home, BookOpen, FileText, AlignLeft } from "lucide-react";
 
 export function Navigation({ currentPage }: { currentPage?: string }) {
   return (
@@ -22,6 +22,12 @@ export function Navigation({ currentPage }: { currentPage?: string }) {
               <Button variant={currentPage === "dictionary" ? "default" : "ghost"} size="sm">
                 <BookOpen className="h-4 w-4 mr-2" />
                 Dictionary
+              </Button>
+            </Link>
+            <Link href="/simple">
+              <Button variant={currentPage === "simple" ? "default" : "ghost"} size="sm">
+                <AlignLeft className="h-4 w-4 mr-2" />
+                Simple
               </Button>
             </Link>
             <Link href="/how-to-use">
